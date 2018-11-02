@@ -8,6 +8,19 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import Flatten
 from keras.layers.embeddings import Embedding
+import matplotlib.pyplot as plt
+
+def plot_acc(history_dict, epochs):
+    acc = history_dict['acc']
+    val_acc = history_dict['val_acc']
+
+    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, val_acc, 'g', label='Testing acc')
+    plt.title('Training and testing accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.show()
 
 def prepare_data(url):
     html = requests.get(url)
@@ -113,4 +126,12 @@ padded_texts = pad_sequences(encoded_texts, maxlen=max_length, padding='post')
 
 # MODEL
 
+# params
+#epochs = 32
 
+
+
+#history = model.fit()
+#history_dict = history.history  # data during training, history_dict.keys()
+#gprah_epochs = range(1, epochs + 1)
+#plot_acc(history_dict, gprah_epochs)
