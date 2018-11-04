@@ -2,11 +2,11 @@ import requests
 import bs4
 import nltk
 import re
+import numpy as np
 from keras.preprocessing.text import one_hot
 from keras.preprocessing.sequence import pad_sequences
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import Flatten
+from keras.models import Input, Model
+from keras.layers import Dense, LSTM, concatenate
 from keras.layers.embeddings import Embedding
 import matplotlib.pyplot as plt
 
@@ -119,19 +119,57 @@ vocabulary_size = len(freq_distribution.items())
 encoded_summaries = [one_hot(' '.join(summary), vocabulary_size) for summary in summaries]  # summary word2index
 encoded_texts = [one_hot(' '.join(text), vocabulary_size) for text in texts]  # text word2index
 
-max_length = len(max(summaries, key=len))
+max_length_summary = len(max(summaries, key=len))
+max_length_text = len(max(texts, key=len))
 
-padded_summaries = pad_sequences(encoded_summaries, maxlen=max_length, padding='post')
-padded_texts = pad_sequences(encoded_texts, maxlen=max_length, padding='post')
+padded_summaries = pad_sequences(encoded_summaries, maxlen=max_length_summary, padding='post')
+padded_texts = pad_sequences(encoded_texts, maxlen=max_length_text, padding='post')
 
 # MODEL
 
+"""
+A second alternative model is to develop a model that generates a single word forecast and call it recursively.
+That is, the decoder uses the context vector and the distributed representation of all words generated so far 
+as input in order to generate the next word.
+
+A language model can be used to interpret the sequence of words generated so far to provide a second context vector 
+to combine with the representation of the source document in order to generate the next word in the sequence.
+
+The summary is built up by recursively calling the model with the previously generated word appended 
+(or, more specifically, the expected previous word during training).
+
+The context vectors could be concentrated or added together to provide a broader context for the decoder to interpret 
+and output the next word.
+
+This is better as the decoder is given an opportunity to use the previously generated words and the source document 
+as a context for generating the next word.
+It does put a burden on the merge operation and decoder to interpret where it is up to in generating the output.
+"""
+
 # params
-#epochs = 32
+epochs = 32
+embedding_size = 100
 
+input_summary = Input(shape=(max_length_summary,))  # summary encoder
+embedding_summary = Embedding(vocabulary_size, embedding_size)(input_summary)
+lstm_summary = LSTM(128)(embedding_summary)
 
+input_text = Input(shape=(max_length_text,))  # text encoder
+embedding_text = Embedding(vocabulary_size, embedding_size)(input_text)
+lstm_text = LSTM(128)(embedding_text)
 
-#history = model.fit()
-#history_dict = history.history  # data during training, history_dict.keys()
-#gprah_epochs = range(1, epochs + 1)
-#plot_acc(history_dict, gprah_epochs)
+decoder = concatenate([lstm_summary, lstm_text])
+outputs = Dense(vocabulary_size, activation='softmax')(decoder)  # next word generator
+
+model = Model(inputs=[input_summary, input_text], outputs=outputs)
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
+#model.summary()
+
+# source: https://machinelearningmastery.com/encoder-decoder-models-text-summarization-keras/
+
+history = model.fit([padded_summaries, padded_texts], epochs=epochs)
+#history = model.fit([padded_summaries, padded_texts], [np.zeros((5, vocabulary_size), dtype=int)], epochs=epochs)
+
+history_dict = history.history  # data during training, history_dict.keys()
+gprah_epochs = range(1, epochs + 1)
+plot_acc(history_dict, gprah_epochs)

@@ -10,7 +10,7 @@ Python + BS4 + NTLK + Tensorflow + Keras
     dense and low-dimensional vectors -> faster computation with neural networks
     
     algorithm:
-        word ('hello') -> one-hot encoded (0,0,0,1,0,0,...) -> reavl-valued vector (0.312, -0.110, -0.499, 0.765, ...)
+        word ('hello') -> one-hot encoded (0,0,0,1,0,0,...) -> real-valued vector (0.312, -0.110, -0.499, 0.765, ...)
         word2vec: CBOW or skipgram, statistical method, CBOW -> predicts context based on current word
         glove: matrix factorization technique (LSA), context defined by word co-occurance matrix
 
