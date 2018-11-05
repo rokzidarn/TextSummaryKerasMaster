@@ -2,7 +2,6 @@ import requests
 import bs4
 import nltk
 import re
-import numpy as np
 from keras.preprocessing.text import one_hot
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Input, Model
@@ -113,6 +112,7 @@ for url in data:
     texts.append(text)
     all_tokens = all_tokens + summary + text
 
+all_tokens.append('<EOS>')
 freq_distribution = nltk.FreqDist(all_tokens)
 vocabulary_size = len(freq_distribution.items())
 
@@ -163,12 +163,15 @@ outputs = Dense(vocabulary_size, activation='softmax')(decoder)  # next word gen
 
 model = Model(inputs=[input_summary, input_text], outputs=outputs)
 model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
-#model.summary()
+model.summary()
 
 # source: https://machinelearningmastery.com/encoder-decoder-models-text-summarization-keras/
 
+exit()
+
 history = model.fit([padded_summaries, padded_texts], epochs=epochs)
-#history = model.fit([padded_summaries, padded_texts], [np.zeros((5, vocabulary_size), dtype=int)], epochs=epochs)
+
+# TODO: try for loop, force generated word into summary
 
 history_dict = history.history  # data during training, history_dict.keys()
 gprah_epochs = range(1, epochs + 1)
