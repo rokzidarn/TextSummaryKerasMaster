@@ -136,8 +136,6 @@ def rouge_l_summary_level(evaluated_sentences, reference_sentences):
 # MAIN
 
 # source: https://github.com/pltrdy/rouge
-# ROUGE measures recall
-# how much the words (and/or n-grams) in the human reference summaries appeared in the machine generated summaries.
 
 reference = 'the cat was under the bed'
 evaluated1 = 'the cat was found under the bed'
