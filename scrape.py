@@ -1,14 +1,24 @@
+import nltk
+import itertools
 import wikipediaapi
 import pywikibot
 from pywikibot import pagegenerators
+from pprint import pprint
 
 global_article = []
 
-def get_article(sections, exclusions):
+def get_data(sections, exclusions):
     for s in sections:
         if s.title not in exclusions:
             global_article.append(s.text)
-            get_article(s.sections, exclusions)
+            get_data(s.sections, exclusions)
+
+def clean_data(text):
+    tokens = nltk.word_tokenize(text)
+    exclude_list = [',', '.', '(', ')', '»', '«', ':', '–']  # keeps dates and numbers, excludes the rest
+    clean_tokens = [e.lower() for e in tokens if e not in exclude_list]
+
+    return clean_tokens
 
 # MAIN
 
@@ -17,14 +27,9 @@ site = pywikibot.Site()
 category = pywikibot.Category(site, 'Category:Naravoslovje')
 
 generated = pagegenerators.CategorizedPageGenerator(category, recurse=2)
-urls = []
-titles = []
-articles = []
-summaries = []
-
 exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici"]
-
-limit = 5
+urls, titles, articles, summaries = [], [], [], []
+limit = 2
 
 for page in generated:
     global_article = []
@@ -36,9 +41,10 @@ for page in generated:
 
     wiki_page = wiki.page(title)
     article_summary = wiki_page.summary
-    get_article(wiki_page.sections, exclusion_sections)
+    get_data(wiki_page.sections, exclusion_sections)
     article_text = ''.join(global_article)
     article_length = len(article_text.split())
+
     print(".", end="", flush=True)
 
     if 800 < article_length < 2200:
@@ -49,8 +55,16 @@ for page in generated:
         summaries.append(article_summary)
         articles.append(article_text)
 
-        print("\n", title, url)
-        print(article_summary, "\n")
-        print(article_text)
-        print(article_length)
-        #input("ENTER\n")
+        print(title, article_length, url, "\n", article_summary, "\n")
+        #print(article_text)
+
+summaries_clean = [clean_data(summary) for summary in summaries]
+articles_clean = [clean_data(article) for article in articles]
+#pprint(summaries_clean)
+
+all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
+freq_distribution = nltk.FreqDist(all_tokens)
+vocabulary_size = len(freq_distribution.items())
+
+print(freq_distribution.most_common(10))
+print(vocabulary_size)
