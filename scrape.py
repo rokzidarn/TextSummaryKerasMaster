@@ -3,6 +3,8 @@ import itertools
 import wikipediaapi
 import pywikibot
 from pywikibot import pagegenerators
+import codecs
+import os
 from pprint import pprint
 
 global_article = []
@@ -22,26 +24,50 @@ def clean_data(text):
 
     return clean_tokens
 
-def write_data(summary_text, article_text):
-    for text in [summary_text, article_text]:
-        raw_sentences = nltk.sent_tokenize(text)
-        sentences = []
+def write_data(title, dir, text):
+    raw_sentences = nltk.sent_tokenize(text)
+    sentences = []
 
-        i = 0
-        while i < len(list(raw_sentences)):
-            s = raw_sentences[i]
-            if s == "n. št.":
-                prev = sentences[-1]
-                sentences.pop()
-                sentences.append(prev + " " + s + " " + raw_sentences[i + 1])
-                i += 1
-            else:
-                sentences.append(s)
+    i = 0
+    while i < len(list(raw_sentences)):
+        s = raw_sentences[i]
+        if s[-3:] == "št." or s[-3:] == "oz." or s[-4:] == "npr.":  # fix special case sentences
+            prev = sentences[-1]
+            sentences.pop()
+            sentences.append(prev + " " + s + " " + raw_sentences[i + 1])
             i += 1
+        else:
+            sentences.append(s)
+        i += 1
 
-        for s in sentences:
-            print(s)
+    #for s in sentences:
+        #print(s)
 
+    with codecs.open('data/'+dir+'/'+title+'.txt', 'w', encoding='utf8') as f:  # write to file
+        for item in sentences:
+            f.write("{}\n".format(item))
+
+def read_data():
+    summaries = []
+    articles = []
+
+    summary_files = os.listdir("data/summaries/")
+    for file in summary_files:
+        f = codecs.open("data/summaries/"+file, encoding='utf-8')
+        tmp = []
+        for line in f:
+            tmp.append(line)
+        summaries.append(' '.join(tmp))
+
+    article_files = os.listdir("data/articles/")
+    for file in article_files:
+        f = codecs.open("data/articles/"+file, encoding='utf-8')
+        tmp = []
+        for line in f:
+            tmp.append(line)
+        articles.append(' '.join(tmp))
+
+    return summaries, articles
 
 # MAIN
 
@@ -53,9 +79,9 @@ category_names = ['Category:Naravoslovje', 'Category:Družboslovje', 'Category:F
 category = pywikibot.Category(site, category_names[6])
 
 generated = pagegenerators.CategorizedPageGenerator(category, recurse=3)
-exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici"]
+exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici", "Viri, dodatno branje"]
 urls, titles, articles, summaries = [], [], [], []
-limit = 1
+limit = 3
 
 for page in generated:
     global_article = []
@@ -81,14 +107,16 @@ for page in generated:
         summaries.append(article_summary)
         articles.append(article_text)
 
-        print(title, article_length, url, "\n")
+        print(title, article_length, url)
         #print(article_summary)
         #print(article_text)
 
-        write_data(article_summary, article_text)
+        write_data(title, 'summaries', article_summary)
+        write_data(title, 'articles', article_text)
 
-summaries_clean = [clean_data(summary) for summary in summaries]
-articles_clean = [clean_data(article) for article in articles]
+summaries_read, articles_read = read_data()
+summaries_clean = [clean_data(summary) for summary in summaries_read]
+articles_clean = [clean_data(article) for article in articles_read]
 #pprint(articles_clean)
 
 all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
