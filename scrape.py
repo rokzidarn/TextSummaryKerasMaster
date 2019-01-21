@@ -22,6 +22,27 @@ def clean_data(text):
 
     return clean_tokens
 
+def write_data(summary_text, article_text):
+    for text in [summary_text, article_text]:
+        raw_sentences = nltk.sent_tokenize(text)
+        sentences = []
+
+        i = 0
+        while i < len(list(raw_sentences)):
+            s = raw_sentences[i]
+            if s == "n. št.":
+                prev = sentences[-1]
+                sentences.pop()
+                sentences.append(prev + " " + s + " " + raw_sentences[i + 1])
+                i += 1
+            else:
+                sentences.append(s)
+            i += 1
+
+        for s in sentences:
+            print(s)
+
+
 # MAIN
 
 wiki = wikipediaapi.Wikipedia('sl')
@@ -34,7 +55,7 @@ category = pywikibot.Category(site, category_names[6])
 generated = pagegenerators.CategorizedPageGenerator(category, recurse=3)
 exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici"]
 urls, titles, articles, summaries = [], [], [], []
-limit = 3
+limit = 1
 
 for page in generated:
     global_article = []
@@ -60,8 +81,11 @@ for page in generated:
         summaries.append(article_summary)
         articles.append(article_text)
 
-        print(title, article_length, url, "\n", article_summary, "\n")
+        print(title, article_length, url, "\n")
+        #print(article_summary)
         #print(article_text)
+
+        write_data(article_summary, article_text)
 
 summaries_clean = [clean_data(summary) for summary in summaries]
 articles_clean = [clean_data(article) for article in articles]
