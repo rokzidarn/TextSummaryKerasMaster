@@ -27,7 +27,8 @@ input_characters = set()
 target_characters = set()
 for story in stories[:200]:
     input_text = story['story']
-    target_text = story['highlights']
+    for highlight in story['highlights']:
+        target_text = highlight
 
     target_text = '\t' + target_text + '\n'  # "tab" = start token, "newline" = end token
     input_texts.append(input_text)
