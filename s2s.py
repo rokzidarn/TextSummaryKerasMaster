@@ -1,14 +1,14 @@
-from pickle import load
 from keras.models import Model
 from keras.layers import Input, LSTM, Dense
 import numpy as np
 import matplotlib.pyplot as plt
+from pickle import dump, load
+from keras.utils.vis_utils import plot_model
 
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
     val_acc = history_dict['val_acc']
 
-    fig = plt.figure()
     plt.plot(epochs, acc, 'r', label='Training acc')
     plt.plot(epochs, val_acc, 'g', label='Testing acc')
     plt.title('Training and testing accuracy')
@@ -17,107 +17,144 @@ def plot_acc(history_dict, epochs):
     plt.legend()
     plt.show()
 
+def parse_file(file, num_samples):
+    eng_sentences = []
+    fra_sentences = []
+    eng_chars = set()
+    fra_chars = set()
+
+    for line in range(num_samples):
+
+        split_line = str(file[line]).split('\t')
+        eng_line = split_line[0]
+        fra_line = '\t' + split_line[1] + '\n'  # '\t' = start token, '\n' = end token
+        eng_sentences.append(eng_line)
+        fra_sentences.append(fra_line)
+
+        for char in eng_line:
+            if char not in eng_chars:
+                eng_chars.add(char)
+
+        for char in fra_line:
+            if char not in fra_chars:
+                fra_chars.add(char)
+
+    fra_chars = sorted(list(fra_chars))  # all possible characters per language
+    eng_chars = sorted(list(eng_chars))
+
+    return eng_sentences, eng_chars, fra_sentences, fra_chars
+
+def create_vocabulary(chars):
+    char2idx = {}  # vocabulary, all possible characters, maps character -> index
+    idx2char = {}  # reverse vocabulary, for decoding
+
+    for k, v in enumerate(chars):
+        char2idx[v] = k
+        idx2char[k] = v
+
+    return char2idx, idx2char
+
+def vectorize(num, eng_sentences, input_sequences, eng2idx, fra_sentences, output_sequences, fra2idx, target_data):
+    # sentence vectorization: char -> one-hot
+    for i in range(num):
+        for k, char in enumerate(eng_sentences[i]):
+            input_sequences[i, k, eng2idx[char]] = 1
+
+        for k, char in enumerate(fra_sentences[i]):
+            output_sequences[i, k, fra2idx[char]] = 1
+            if k > 0:  # ahead by one timestep, without start token
+                target_data[i, k - 1, fra2idx[char]] = 1
+
+    return input_sequences, output_sequences, target_data
+
+def decode_sequence(encoder_model, decoder_model, input_sequence, fra_chars, fra2idx, idx2fra, max_len_fra):
+    # encode the input as state vectors
+    states_value = encoder_model.predict(input_sequence)
+
+    # generate empty target sequence of length 1
+    target_sequence = np.zeros((1, 1, len(fra_chars)))
+    # populate the first character of target sequence with the start character
+    target_sequence[0, 0, fra2idx['\t']] = 1
+
+    prediction = ''
+    stop_condition = False
+
+    while not stop_condition:
+        output_token, h, c = decoder_model.predict(x=[target_sequence] + states_value)
+
+        predicted_token_index = np.argmax(output_token[0, 0, :])
+        predicted_char = idx2fra[predicted_token_index]
+        prediction += predicted_char
+
+        # exit condition, either hit max length or find stop character
+        if (predicted_char == '\n') or (len(prediction) > max_len_fra):
+            stop_condition = True
+
+        target_sequence = np.zeros((1, 1, len(fra_chars)))
+        target_sequence[0, 0, predicted_token_index] = 1
+
+        states_value = [h, c]
+
+    return prediction
+
+
 # MAIN
+# task: english -> french translator
 
-stories = load(open('data/review_dataset.pkl', 'rb'))  # 1000 samples
+# parse file
+file = open('data/translations.txt', encoding='utf-8').read().split('\n')
+num_samples = 2000
 
-input_texts = []
-target_texts = []
-input_characters = set()
-target_characters = set()
+# get data, prepare vocabulary
+eng_sentences, eng_chars, fra_sentences, fra_chars = parse_file(file, num_samples)
+eng2idx, idx2eng = create_vocabulary(eng_chars)
+fra2idx, idx2fra = create_vocabulary(fra_chars)
+max_len_eng = max([len(line) for line in eng_sentences])
+max_len_fra = max([len(line) for line in fra_sentences])
 
-for story in stories[:100]:
-    input_text = story['story']
-    for highlight in story['highlights']:
-        target_text = highlight
+# vectorize data
+input_sequences = np.zeros(shape=(num_samples, max_len_eng, len(eng_chars)), dtype='float32')
+output_sequences = np.zeros(shape=(num_samples, max_len_fra, len(fra_chars)), dtype='float32')
+target_data = np.zeros(shape=(num_samples, max_len_fra, len(fra_chars)), dtype='float32')
+input_sequences, output_sequences, target_data = vectorize(num_samples, eng_sentences, input_sequences, eng2idx,
+                                                           fra_sentences, output_sequences, fra2idx, target_data)
 
-    target_text = '\t' + target_text + '\n'  # "tab" = start token, "newline" = end token
-    input_texts.append(input_text)
-    target_texts.append(target_text)
-    for char in input_text:
-        if char not in input_characters:
-            input_characters.add(char)
-    for char in target_text:
-        if char not in target_characters:
-            target_characters.add(char)
+# dump(input_sequences, open('data/input_sequences.pkl', 'wb'))
+# input_sequences = load(open('data/input_sequences.pkl', 'rb'))
 
-input_characters = sorted(list(input_characters))  # all possible input characters
-target_characters = sorted(list(target_characters))
-num_encoder_tokens = len(input_characters)
-num_decoder_tokens = len(target_characters)
-max_encoder_seq_length = max([len(txt) for txt in input_texts])
-max_decoder_seq_length = max([len(txt) for txt in target_texts])
+# model hyperparams
+latent_size = 256  # number of units (output dimensionality)
+batch_size = 64
+epochs = 50
 
-# char2idx
-input_token_index = dict([(char, i) for i, char in enumerate(input_characters)])
-target_token_index = dict([(char, i) for i, char in enumerate(target_characters)])
-
-encoder_input_data = np.zeros(
-    (len(input_texts), max_encoder_seq_length, num_encoder_tokens), dtype='float32')
-decoder_input_data = np.zeros(
-    (len(input_texts), max_decoder_seq_length, num_decoder_tokens), dtype='float32')
-decoder_target_data = np.zeros(
-    (len(input_texts), max_decoder_seq_length, num_decoder_tokens), dtype='float32')
-
-for i, (input_text, target_text) in enumerate(zip(input_texts, target_texts)):  # vectorization: char -> one-hot
-    for t, char in enumerate(input_text):
-        encoder_input_data[i, t, input_token_index[char]] = 1.
-    for t, char in enumerate(target_text):
-        # decoder_target_data is ahead of decoder_input_data by one timestep
-        decoder_input_data[i, t, target_token_index[char]] = 1.  # start and end token
-        if t > 0:
-            # decoder_target_data will be ahead by one timestep
-            # and will not include the start token ("tab" = [1 0 0 0 0 ...])
-            decoder_target_data[i, t - 1, target_token_index[char]] = 1.  # only end token
-
-
-# MODEL
-batch_size = 32
-epochs = 12
-latent_dim = 128  # number of units (output dimensionality)
-
-encoder_inputs = Input(shape=(None, num_encoder_tokens))
-encoder = LSTM(latent_dim, return_state=True)
+# encoder
+encoder_input = Input(shape=(None, len(eng_chars)))
+encoder_LSTM = LSTM(latent_size, return_state=True)
 # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
-encoder_outputs, state_h, state_c = encoder(encoder_inputs)
-encoder_states = [state_h, state_c]
+# return state = returns the hidden state output and cell state for the last input time step
+encoder_outputs, encoder_h, encoder_c = encoder_LSTM(encoder_input)
+encoder_states = [encoder_h, encoder_c]
 
-# set up decoder, using encoder_states as initial state
-decoder_inputs = Input(shape=(None, num_decoder_tokens))
-# return full output sequences
-decoder_lstm = LSTM(latent_dim, return_sequences=True, return_state=True)  # return state needed for inference
-decoder_outputs, _, _ = decoder_lstm(decoder_inputs, initial_state=encoder_states)
-decoder_dense = Dense(num_decoder_tokens, activation='softmax')  # predict next character in training
-decoder_outputs = decoder_dense(decoder_outputs)
+# decoder
+decoder_input = Input(shape=(None, len(fra_chars)))  # set up decoder, using encoder_states as initial state
+decoder_LSTM = LSTM(latent_size, return_sequences=True, return_state=True)  # return state needed for inference
+# return_sequence = returns the hidden state output for each input time step
+decoder_out, _, _ = decoder_LSTM(decoder_input, initial_state=encoder_states)
+decoder_dense = Dense(len(fra_chars), activation='softmax')
+decoder_out = decoder_dense(decoder_out)
 
-# encoder_input_data & decoder_input_data -> decoder_target_data
-model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+# training
+model = Model(inputs=[encoder_input, decoder_input], outputs=[decoder_out])
 model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
-history = model.fit([encoder_input_data, decoder_input_data], decoder_target_data,
+history = model.fit(x=[input_sequences, output_sequences], y=target_data,
           batch_size=batch_size, epochs=epochs, validation_split=0.2)
 
+# plot_model(model, to_file='model.png', show_shapes=True)
+# model.save('data/model.h5')
+
 history_dict = history.history
-print(round(max(history_dict['val_acc']), 3))
-gprah_epochs = range(1, epochs + 1)
-plot_acc(history_dict, gprah_epochs)
-# model.save('data/model2.h5')
-
-# INFERENCE
-# define sampling models
-encoder_model = Model(encoder_inputs, encoder_states)
-
-decoder_state_input_h = Input(shape=(latent_dim,))
-decoder_state_input_c = Input(shape=(latent_dim,))
-decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
-decoder_outputs, state_h, state_c = decoder_lstm(decoder_inputs, initial_state=decoder_states_inputs)
-decoder_states = [state_h, state_c]
-decoder_outputs = decoder_dense(decoder_outputs)
-
-decoder_model = Model([decoder_inputs] + decoder_states_inputs, [decoder_outputs] + decoder_states)
-
-# idx2char
-reverse_input_char_index = dict((i, char) for char, i in input_token_index.items())
-reverse_target_char_index = dict((i, char) for char, i in target_token_index.items())
+graph_epochs = range(1, epochs + 1)
+plot_acc(history_dict, graph_epochs)
 
 """
 In inference mode, when we want to decode unknown input sequences, we:
@@ -133,40 +170,24 @@ In inference mode, when we want to decode unknown input sequences, we:
         hit the character limit.
 """
 
-def decode_sequence(input_seq):
-    # encode the input as state vectors
-    states_value = encoder_model.predict(input_seq)
-    # generate empty target sequence of length 1.
-    target_seq = np.zeros((1, 1, num_decoder_tokens))
-    # populate the first character of target sequence with the start character
-    target_seq[0, 0, target_token_index['\t']] = 1.
+encoder_model = Model(encoder_input, encoder_states)
 
-    stop_condition = False
-    decoded_sentence = ''
+decoder_state_input_h = Input(shape=(latent_size,))
+decoder_state_input_c = Input(shape=(latent_size,))
+decoder_input_states = [decoder_state_input_h, decoder_state_input_c]
+decoder_out, decoder_h, decoder_c = decoder_LSTM(decoder_input, initial_state=decoder_input_states)
+decoder_states = [decoder_h, decoder_c]
+decoder_out = decoder_dense(decoder_out)
 
-    while not stop_condition:
-        output_tokens, h, c = decoder_model.predict([target_seq] + states_value)
-
-        sampled_token_index = np.argmax(output_tokens[0, -1, :])
-        sampled_char = reverse_target_char_index[sampled_token_index]
-        decoded_sentence += sampled_char
-
-        # exit condition, either hit max length or find stop character
-        if sampled_char == '\n' or len(decoded_sentence) > max_decoder_seq_length:
-            stop_condition = True
-
-        target_seq = np.zeros((1, 1, num_decoder_tokens))  # update the target sequence
-        target_seq[0, 0, sampled_token_index] = 1.
-
-        states_value = [h, c]  # update states
-
-    return decoded_sentence
-
+decoder_model = Model(inputs=[decoder_input] + decoder_input_states, outputs=[decoder_out] + decoder_states)
 
 # predictions
-for seq_index in range(10):
-    input_seq = encoder_input_data[seq_index: seq_index + 1]
-    decoded_sentence = decode_sequence(input_seq)
+for index in range(10):
+    input_sequence = input_sequences[index:index+1]
+    prediction = decode_sequence(encoder_model, decoder_model, input_sequence,
+                                       fra_chars, fra2idx, idx2fra, max_len_fra)
+
     print('-')
-    print('Input sentence:', input_texts[seq_index])
-    print('Decoded sentence:', decoded_sentence)
+    print('Input sentence:', eng_sentences[index])
+    print('Output sentence:', fra_sentences[index][1:-1])
+    print('Decoded sentence:', prediction)

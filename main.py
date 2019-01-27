@@ -1,108 +1,139 @@
-import numpy
+import numpy as np
+from random import randint
+from numpy import array
+from numpy import argmax
+from numpy import array_equal
+from keras.utils import to_categorical
 from keras.models import Model
-from keras.layers import Input, LSTM, Dense
+from keras.layers import Input
+from keras.layers import LSTM
+from keras.layers import Dense
+import matplotlib.pyplot as plt
 
-# DATA
-encoder_data = numpy.array([
-    [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
-    [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]],
-    [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0]],
-    [[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]],
-    [[0, 0, 1, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [1, 0, 0, 0]]
-])
+def generate_sequence(length, n_unique):
+    return [randint(1, n_unique-1) for _ in range(length)]
 
-decoder_data = numpy.array([
-    [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 1]],
-    [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 1, 0]],
-    [[0, 0, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]],
-    [[0, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
-    [[0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]
-])
+def generate_dataset(input_sample_size, output_sample_size, sample_token_size, n_samples):
+    X1, X2, y = list(), list(), list()
 
-target_data = numpy.array([  # 1 timestep offset from decoder_data
-    [[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 0]],
-    [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 0]],
-    [[0, 1, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0]],
-    [[1, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]],
-    [[0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 0]]
-])
+    for _ in range(n_samples):
+        source = generate_sequence(input_sample_size, sample_token_size)  # input sequence
+        target = source[:output_sample_size]  # output sequence
+        target.reverse()
 
-num_samples = encoder_data.shape[0]
-sample_size = encoder_data.shape[1]
-max_length = encoder_data.shape[2]
+        # add start token to target sequence, 1 timestep ahead, last token discarded
+        target_in = [0] + target[:-1]
 
-# MODEL
+        # one-hot encode: 3 -> [0 0 0 1 0 ...]
+        src_encoded = to_categorical([source], num_classes=sample_token_size)
+        tar_encoded = to_categorical([target], num_classes=sample_token_size)
+        tar_in_encoded = to_categorical([target_in], num_classes=sample_token_size)
 
-# encoder
-encoder_inputs = Input(shape=(None, max_length))
-encoder_lstm = LSTM(512, return_state=True)
-encoder_outputs, state_h, state_c = encoder_lstm(encoder_inputs)
-encoder_states = [state_h, state_c]
+        X1.append(src_encoded)
+        X2.append(tar_in_encoded)
+        y.append(tar_encoded)
 
-# decoder
-decoder_inputs = Input(shape=(None, max_length))
-decoder_lstm = LSTM(512, return_sequences=True, return_state=True)
-decoder_outputs, _, _ = decoder_lstm(decoder_inputs, initial_state=encoder_states)
-decoder_dense = Dense(max_length, activation='softmax')
-decoder_outputs = decoder_dense(decoder_outputs)
+    X1 = np.squeeze(array(X1), axis=1)  # removes single-dimensional entries (2,1,6,10) -> (2,6,10)
+    X2 = np.squeeze(array(X2), axis=1)
+    y = np.squeeze(array(y), axis=1)
 
-# s2s
-model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
-print(model.summary())
+    return X1, X2, y
 
-history = model.fit([encoder_data, decoder_data], target_data,
-          batch_size=32, epochs=100, validation_split=0.2)
+def define_models(n_input, n_output, latent_units):
+    encoder_inputs = Input(shape=(None, n_input))
+    encoder = LSTM(latent_units, return_state=True)
+    encoder_outputs, state_h, state_c = encoder(encoder_inputs)
+    encoder_states = [state_h, state_c]
+
+    decoder_inputs = Input(shape=(None, n_output))
+    decoder_lstm = LSTM(latent_units, return_sequences=True, return_state=True)
+    decoder_outputs, _, _ = decoder_lstm(decoder_inputs, initial_state=encoder_states)
+    decoder_dense = Dense(n_output, activation='softmax')
+    decoder_outputs = decoder_dense(decoder_outputs)
+    model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+
+    # inference
+    encoder_model = Model(encoder_inputs, encoder_states)
+
+    decoder_state_input_h = Input(shape=(latent_units,))
+    decoder_state_input_c = Input(shape=(latent_units,))
+    decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
+    decoder_outputs, state_h, state_c = decoder_lstm(decoder_inputs, initial_state=decoder_states_inputs)
+    decoder_states = [state_h, state_c]
+    decoder_outputs = decoder_dense(decoder_outputs)
+
+    decoder_model = Model([decoder_inputs] + decoder_states_inputs, [decoder_outputs] + decoder_states)
+
+    return model, encoder_model, decoder_model
+
+def predict_sequence(inf_encoder_model, inf_decoder_model, input_sequence, output_sample_size, sample_token_size):
+    state = inf_encoder_model.predict(input_sequence)  # get input through encoder
+
+    # generate start token, first input to decoder
+    target_seq = array([0.0 for _ in range(sample_token_size)]).reshape(1, 1, sample_token_size)
+    prediction = list()  # prediction storage, updated token by token
+
+    for t in range(output_sample_size):
+        # predict next char
+        yhat, h, c = inf_decoder_model.predict([target_seq] + state)
+        predicted_token = argmax(yhat[0, 0, :])
+        prediction.append(predicted_token)  # possibility distribution for each possible token
+
+        state = [h, c]  # update state
+        target_seq = yhat  # update target sequence, next input for decoder
+
+    return array(prediction)
+
+def plot_acc(history_dict, epochs):
+    acc = history_dict['acc']
+    val_acc = history_dict['val_acc']
+
+    fig = plt.figure()
+    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, val_acc, 'g', label='Testing acc')
+    plt.title('Training and testing accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.show()
+
+# MAIN
+# SEQ2SEQ
+
+input_sample_size = 6  # array length of sample: [x1 x2 x3 x4 x5 x6]
+output_sample_size = 3
+sample_token_size = 9 + 1  # possible classes, tokens [1,9]: e.g. [4, 5, 1, 9, 3, 3]
+dataset_size = 6000
+# task: [4, 5, 1, 9, 3, 3] -> [1, 5, 4]
+
+test_sample = generate_sequence(input_sample_size, sample_token_size)  # 0-9 numbers as possible tokens, array length 6
+X1, X2, y = generate_dataset(input_sample_size, output_sample_size, sample_token_size, dataset_size)
+
+latent_size = 128  # number of LSTM cells
+epochs = 4
+train_model, inf_encoder_model, inf_decoder_model = define_models(sample_token_size, sample_token_size, latent_size)
+train_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['acc'])
+history = train_model.fit([X1, X2], y, epochs=epochs, validation_split=0.1)
 
 history_dict = history.history
-print(round(max(history_dict['val_acc']), 3))
+gprah_epochs = range(1, epochs + 1)
+plot_acc(history_dict, gprah_epochs)
 
-# inference setup
-encoder_model = Model(encoder_inputs, encoder_states)
+# validation
+total, correct = 100, 0
+for _ in range(total):
+    X1, X2, y = generate_dataset(input_sample_size, output_sample_size, sample_token_size, 1)
+    target = [argmax(vector) for vector in y[0]]
+    prediction = predict_sequence(inf_encoder_model, inf_decoder_model, X1, output_sample_size, sample_token_size)
+    if array_equal(target, prediction):
+        correct += 1
 
-decoder_state_input_h = Input(shape=(512,))
-decoder_state_input_c = Input(shape=(512,))
-decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
-decoder_outputs, state_h, state_c = decoder_lstm(decoder_inputs, initial_state=decoder_states_inputs)
-decoder_states = [state_h, state_c]
-decoder_outputs = decoder_dense(decoder_outputs)
+print('Accuracy: %.2f%%' % (float(correct)/float(total)*100.0))
 
-decoder_model = Model([decoder_inputs] + decoder_states_inputs, [decoder_outputs] + decoder_states)
-
-# predict (inference loop)
-def decode_sequence(input_seq, char2idx, idx2char):
-    # Encode the input as state vectors.
-    states_value = encoder_model.predict(input_seq)
-
-    # Generate empty target sequence of length 1.
-    target_seq = numpy.zeros((1, 1, len(char2idx)))
-    # Populate the first character of target sequence with the start character.
-    target_seq[0, 0, char2idx['\t']] = 1.  # 3D array, first element is start token
-
-    # Sampling loop for a batch of sequences
-    # (to simplify, here we assume a batch of size 1).
-    stop_condition = False
-    decoded_sentence = ''
-    while not stop_condition:
-        output_tokens, h, c = decoder_model.predict(
-            [target_seq] + states_value)
-
-        # Sample a token
-        sampled_token_index = numpy.argmax(output_tokens[0, -1, :])  # greedy search
-        sampled_char = idx2char[sampled_token_index]
-        decoded_sentence += sampled_char
-
-        # Exit condition: either hit max length
-        # or find stop character.
-        if (sampled_char == '\n' or
-           len(decoded_sentence) > max_length):
-            stop_condition = True
-
-        # Update the target sequence (of length 1).
-        target_seq = numpy.zeros((1, 1, len(char2idx)))
-        target_seq[0, 0, sampled_token_index] = 1.  # previous character
-
-        # Update states
-        states_value = [h, c]
-
-    return decoded_sentence
+# check
+for _ in range(5):
+    X1, X2, y = generate_dataset(input_sample_size, output_sample_size, sample_token_size, 1)
+    input = [argmax(vector) for vector in X1[0]]
+    target = [argmax(vector) for vector in y[0]]
+    prediction = predict_sequence(inf_encoder_model, inf_decoder_model, X1, output_sample_size, sample_token_size)
+    print('X=%s y=%s, prediction=%s' % (input, target, prediction))
