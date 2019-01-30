@@ -3,6 +3,7 @@ from __future__ import division, print_function, unicode_literals
 import itertools
 import nltk
 
+
 def _get_ngrams(n, text):  # calcualtes n-grams
     ngram_set = set()
     text_length = len(text)
@@ -11,8 +12,10 @@ def _get_ngrams(n, text):  # calcualtes n-grams
         ngram_set.add(tuple(text[i:i + n]))
     return ngram_set
 
+
 def _split_into_words(sentences):  # splits multiple sentences into words and flattens the result
     return list(itertools.chain(*[_.split(" ") for _ in sentences]))
+
 
 def _get_word_ngrams(n, sentences):  # calculates word n-grams for multiple sentences
     assert len(sentences) > 0
@@ -21,10 +24,12 @@ def _get_word_ngrams(n, sentences):  # calculates word n-grams for multiple sent
     words = _split_into_words(sentences)
     return _get_ngrams(n, words)
 
+
 def _len_lcs(x, y):  # returns the length of the Longest Common Subsequence between sequences x and y
     table = _lcs(x, y)
     n, m = len(x), len(y)
     return table[n, m]
+
 
 def _lcs(x, y):  # computes the length of the longest common subsequence (LCS) between two strings
     n, m = len(x), len(y)
@@ -38,6 +43,7 @@ def _lcs(x, y):  # computes the length of the longest common subsequence (LCS) b
             else:
                 table[i, j] = max(table[i - 1, j], table[i, j - 1])
     return table
+
 
 def _recon_lcs(x, y):  # returns the LCS between x and y
     i, j = len(x), len(y)
@@ -55,6 +61,7 @@ def _recon_lcs(x, y):  # returns the LCS between x and y
 
     recon_tuple = tuple(map(lambda x: x[0], _recon(i, j)))
     return recon_tuple
+
 
 def rouge_n(evaluated_sentences, reference_sentences, n=2):  # computes ROUGE-N of two text collections of sentences
     if len(evaluated_sentences) <= 0 or len(reference_sentences) <= 0:
@@ -84,6 +91,7 @@ def rouge_n(evaluated_sentences, reference_sentences, n=2):  # computes ROUGE-N 
 
     return {"f": f1_score, "p": precision, "r": recall}
 
+
 def _union_lcs(evaluated_sentences, reference_sentence, prev_union=None):
     if prev_union is None:
         prev_union = set()
@@ -104,6 +112,7 @@ def _union_lcs(evaluated_sentences, reference_sentence, prev_union=None):
 
     new_lcs_count = len(lcs_union) - prev_count
     return new_lcs_count, lcs_union
+
 
 def rouge_l_summary_level(evaluated_sentences, reference_sentences):
     # computes ROUGE-L (summary level) of two text collections of sentences.
@@ -133,8 +142,8 @@ def rouge_l_summary_level(evaluated_sentences, reference_sentences):
     f_lcs = num / (denom + 1e-12)
     return {"f": f_lcs, "p": p_lcs, "r": r_lcs}
 
-# MAIN
 
+# MAIN
 # source: https://github.com/pltrdy/rouge
 
 reference = 'the cat was under the bed'
