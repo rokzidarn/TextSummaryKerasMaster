@@ -106,7 +106,7 @@ def plot_acc(history_dict, epochs):
     # fig.savefig('test.png')
 
 
-def s2s_architecture(vocabulary_size, max_length_summary, input_sequences, output_sequences, target_sequences):
+def seq2seq_architecture(vocabulary_size, max_length_summary, input_sequences, output_sequences, target_sequences):
     # model hyper parameters
     latent_size = 128  # number of units (output dimensionality)
     embedding_size = 48  # word vector size
@@ -131,17 +131,14 @@ def s2s_architecture(vocabulary_size, max_length_summary, input_sequences, outpu
     decoder_dense = Dense(vocabulary_size, activation='softmax')
     decoder_outputs = decoder_dense(decoder_outputs)
 
-    # TODO
-    # numpy.expand_dims(target_sequences, -1)
-    # decoder_dense = TimeDistributed(Dense(vocabulary_size, activation='softmax'))
-    encoded_target = one_hot_encode(target_sequences, vocabulary_size, max_length_summary)
+    # encoded_target = one_hot_encode(target_sequences, vocabulary_size, max_length_summary)
 
     # training
     model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=[decoder_outputs])
     model.summary()
     # model.save('data/model.h5')
-    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
-    history = model.fit([input_sequences, output_sequences], encoded_target,
+    model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['acc'])
+    history = model.fit([input_sequences, output_sequences], numpy.expand_dims(target_sequences, -1),
                         batch_size=batch_size, epochs=epochs)
 
     # inference
@@ -157,6 +154,37 @@ def s2s_architecture(vocabulary_size, max_length_summary, input_sequences, outpu
     decoder_model = Model(inputs=[decoder_inputs] + decoder_input_states, outputs=[decoder_out] + decoder_states)
 
     return history, model, encoder_model, decoder_model
+
+
+def predict_sequence(encoder_model, decoder_model, input_sequence, vocabulary_size, word2idx, idx2word, max_len):
+    # encode the input as state vectors
+    states_value = encoder_model.predict(input_sequence)
+
+    # generate empty target sequence of length 1
+    target_sequence = numpy.zeros((1, 1, vocabulary_size))
+    # populate the first character of target sequence with the start character
+    target_sequence[0, 0, word2idx['<START>']] = 1
+
+    prediction = []
+    stop_condition = False
+
+    while not stop_condition:
+        output_token, h, c = decoder_model.predict(x=[target_sequence] + states_value)
+
+        predicted_word_index = numpy.argmax(output_token[0, 0, :])
+        predicted_word = idx2word[predicted_word_index]
+        prediction.append(predicted_word)
+
+        # exit condition, either hit max length or find stop character
+        if (predicted_word == '<END>') or (len(prediction) > max_len):
+            stop_condition = True
+
+        target_sequence = numpy.zeros((1, 1, vocabulary_size))
+        target_sequence[0, 0, predicted_word_index] = 1
+
+        states_value = [h, c]
+
+    return prediction
 
 
 # MAIN
@@ -198,7 +226,16 @@ X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='
 Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
 # training model, encoder, decoder model needed for inference
-history, model, encoder_model, decoder_model = s2s_architecture(vocabulary_size, max_length_summary,
-                                                                X_article, X_summary, Y_target)
+history, model, encoder_model, decoder_model = seq2seq_architecture(vocabulary_size, max_length_summary,
+                                                                    X_article, X_summary, Y_target)
 
 # inference
+for index in range(10):
+    input_sequence = X_article[index:index+1]
+    prediction = predict_sequence(encoder_model, decoder_model, input_sequence, vocabulary_size,
+                                  word2idx, idx2word, max_length_summary)
+
+    print('-')
+    print('Input:', articles_clean[index])
+    print('Output:', summaries_clean[index])
+    print('Prediction:', prediction)
