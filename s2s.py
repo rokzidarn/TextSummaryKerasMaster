@@ -2,6 +2,7 @@ from keras.models import Model
 from keras.layers import Input, LSTM, Dense
 import numpy as np
 import matplotlib.pyplot as plt
+import pprint
 from pickle import dump, load
 from keras.utils.vis_utils import plot_model
 
@@ -119,6 +120,26 @@ target_data = np.zeros(shape=(num_samples, max_len_fra, len(fra_chars)), dtype='
 input_sequences, output_sequences, target_data = vectorize(num_samples, eng_sentences, input_sequences, eng2idx,
                                                            fra_sentences, output_sequences, fra2idx, target_data)
 
+print(fra_sentences[0])
+print(fra2idx)
+doutput = output_sequences[0]
+dtarget = target_data[0]
+dtest = (output_sequences[0])[1:]
+
+for c in doutput:
+    print(np.argmax(c), " ", end="", flush=True)
+print("")
+for c in dtarget:
+    print(np.argmax(c), " ", end="", flush=True)
+print("")
+tmp = []
+for c in dtest:
+    tmp.append(np.argmax(c))
+tmp = tmp + [0]
+for c in tmp:
+    print(c, " ", end="", flush=True)
+exit()
+
 # dump(input_sequences, open('data/input_sequences.pkl', 'wb'))
 # input_sequences = load(open('data/input_sequences.pkl', 'rb'))
 
@@ -139,9 +160,9 @@ encoder_states = [encoder_h, encoder_c]
 decoder_input = Input(shape=(None, len(fra_chars)))  # set up decoder, using encoder_states as initial state
 decoder_LSTM = LSTM(latent_size, return_sequences=True, return_state=True)  # return state needed for inference
 # return_sequence = returns the hidden state output for each input time step
-decoder_out, _, _ = decoder_LSTM(decoder_input, initial_state=encoder_states)
+decoder_outputs, _, _ = decoder_LSTM(decoder_input, initial_state=encoder_states)
 decoder_dense = Dense(len(fra_chars), activation='softmax')
-decoder_out = decoder_dense(decoder_out)
+decoder_out = decoder_dense(decoder_outputs)
 
 # training
 model = Model(inputs=[encoder_input, decoder_input], outputs=[decoder_out])

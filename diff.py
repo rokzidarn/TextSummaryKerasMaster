@@ -3,7 +3,10 @@ import nltk
 import codecs
 import itertools
 from pprint import pprint
+import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
+from keras.models import Model
+from keras.layers import Input, LSTM, Dense, Embedding
 
 
 def read_data():
@@ -75,6 +78,69 @@ def post_process(predictions, idx2word):  # transform array of ints (idx2word) -
     return predicted_texts
 
 
+def plot_acc(history_dict, epochs):
+    acc = history_dict['acc']
+    val_acc = history_dict['val_acc']
+
+    fig = plt.figure()
+    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, val_acc, 'g', label='Testing acc')
+    plt.title('Training and testing accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.show()
+    #fig.savefig('test.png')
+
+
+def s2s_architecture(vocabulary_size, input_sequences, output_sequences, target_sequences):
+    # model hyper parameters
+    latent_size = 128  # number of units (output dimensionality)
+    embedding_size = 48  # word vector size
+    batch_size = 64
+    epochs = 50
+
+    # encoder
+    encoder_inputs = Input(shape=(None, ))
+    encoder_embeddings = Embedding(vocabulary_size, embedding_size)(encoder_inputs)
+    encoder_LSTM = LSTM(latent_size, return_state=True)
+    # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
+    # return state = returns the hidden state output and cell state for the last input time step
+    encoder_outputs, encoder_h, encoder_c = encoder_LSTM(encoder_embeddings)
+    encoder_states = [encoder_h, encoder_c]
+
+    # decoder
+    decoder_inputs = Input(shape=(None, ))  # set up decoder, using encoder_states as initial state
+    decoder_embeddings = Embedding(vocabulary_size, embedding_size)(decoder_inputs)
+    decoder_LSTM = LSTM(latent_size, return_sequences=True, return_state=True)  # return state needed for inference
+    # return_sequence = returns the hidden state output for each input time step
+    decoder_outputs, _, _ = decoder_LSTM(decoder_embeddings, initial_state=encoder_states)  # TODO: one-hot encode taget data?
+    decoder_dense = Dense(vocabulary_size, activation='softmax')
+    decoder_outputs = decoder_dense(decoder_outputs)
+
+    # training
+    model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=[decoder_outputs])
+    model.summary()
+
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
+    history = model.fit(x=[input_sequences, output_sequences], y=target_sequences,
+                        batch_size=batch_size, epochs=epochs, validation_split=0.2)
+
+    # inference
+    encoder_model = Model(encoder_inputs, encoder_states)
+
+    decoder_state_input_h = Input(shape=(latent_size,))
+    decoder_state_input_c = Input(shape=(latent_size,))
+    decoder_input_states = [decoder_state_input_h, decoder_state_input_c]
+    decoder_out, decoder_h, decoder_c = decoder_LSTM(decoder_inputs, initial_state=decoder_input_states)
+    decoder_states = [decoder_h, decoder_c]
+    decoder_out = decoder_dense(decoder_out)
+
+    decoder_model = Model(inputs=[decoder_inputs] + decoder_input_states, outputs=[decoder_out] + decoder_states)
+
+    return history, encoder_model, decoder_model
+
+
 # MAIN
 
 summaries_read, articles_read = read_data()  # 1D array, each element is string of sentences, separated by newline
@@ -102,9 +168,15 @@ print('Inverted vocabulary (index -> word): ', {k: idx2word[k] for k in list(idx
 summaries_vectors = pre_process(summaries_clean, word2idx)
 articles_vectors = pre_process(articles_clean, word2idx)
 
+tmp_vectors = pre_process(summaries_clean, word2idx)  # same as summaries_vectors, but with delay
+target_vectors = []  # ahead by one timestep, without start token
+for tmp in tmp_vectors:
+    tmp.append(word2idx['<PAD>'])  # added <PAD>, so the dimensions match
+    target_vectors.append(tmp[1:])
+
 # padded array of summaries/articles, added at the end
 X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
 X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
+Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
-# decoded predictions
-predictions = post_process(summaries_vectors, idx2word)  # 2D array of predicted summaries
+history, encoder_model, decoder_model = s2s_architecture(vocabulary_size, X_article, X_summary, Y_target)
