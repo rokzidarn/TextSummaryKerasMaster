@@ -2,12 +2,13 @@ import os
 import nltk
 import codecs
 import itertools
+import numpy
 from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, LSTM, Dense, Embedding
-
+from keras.layers import Input, LSTM, Dense, Embedding, TimeDistributed
+from keras.utils import to_categorical
 
 def read_data():
     summaries = []
@@ -78,6 +79,18 @@ def post_process(predictions, idx2word):  # transform array of ints (idx2word) -
     return predicted_texts
 
 
+def one_hot_encode(sequences, vocabulary_size, max_length_summary):
+    # to_categorical(d, num_classes=vocabulary_size)
+    encoded = numpy.zeros(shape=(len(sequences), max_length_summary, vocabulary_size))
+    for s in range(len(sequences)):
+        for k, char in enumerate(sequences[s]):
+            encoded[s, k, char] = 1
+
+    print('Target sequences shape after one-hot encoding: ', encoded.shape)
+
+    return encoded
+
+
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
     val_acc = history_dict['val_acc']
@@ -90,10 +103,10 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    #fig.savefig('test.png')
+    # fig.savefig('test.png')
 
 
-def s2s_architecture(vocabulary_size, input_sequences, output_sequences, target_sequences):
+def s2s_architecture(vocabulary_size, max_length_summary, input_sequences, output_sequences, target_sequences):
     # model hyper parameters
     latent_size = 128  # number of units (output dimensionality)
     embedding_size = 48  # word vector size
@@ -114,17 +127,22 @@ def s2s_architecture(vocabulary_size, input_sequences, output_sequences, target_
     decoder_embeddings = Embedding(vocabulary_size, embedding_size)(decoder_inputs)
     decoder_LSTM = LSTM(latent_size, return_sequences=True, return_state=True)  # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
-    decoder_outputs, _, _ = decoder_LSTM(decoder_embeddings, initial_state=encoder_states)  # TODO: one-hot encode taget data?
+    decoder_outputs, _, _ = decoder_LSTM(decoder_embeddings, initial_state=encoder_states)
     decoder_dense = Dense(vocabulary_size, activation='softmax')
     decoder_outputs = decoder_dense(decoder_outputs)
+
+    # TODO
+    # numpy.expand_dims(target_sequences, -1)
+    # decoder_dense = TimeDistributed(Dense(vocabulary_size, activation='softmax'))
+    encoded_target = one_hot_encode(target_sequences, vocabulary_size, max_length_summary)
 
     # training
     model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=[decoder_outputs])
     model.summary()
-
+    # model.save('data/model.h5')
     model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['acc'])
-    history = model.fit(x=[input_sequences, output_sequences], y=target_sequences,
-                        batch_size=batch_size, epochs=epochs, validation_split=0.2)
+    history = model.fit([input_sequences, output_sequences], encoded_target,
+                        batch_size=batch_size, epochs=epochs)
 
     # inference
     encoder_model = Model(encoder_inputs, encoder_states)
@@ -138,7 +156,7 @@ def s2s_architecture(vocabulary_size, input_sequences, output_sequences, target_
 
     decoder_model = Model(inputs=[decoder_inputs] + decoder_input_states, outputs=[decoder_out] + decoder_states)
 
-    return history, encoder_model, decoder_model
+    return history, model, encoder_model, decoder_model
 
 
 # MAIN
@@ -179,4 +197,8 @@ X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding=
 X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
 Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
-history, encoder_model, decoder_model = s2s_architecture(vocabulary_size, X_article, X_summary, Y_target)
+# training model, encoder, decoder model needed for inference
+history, model, encoder_model, decoder_model = s2s_architecture(vocabulary_size, max_length_summary,
+                                                                X_article, X_summary, Y_target)
+
+# inference
