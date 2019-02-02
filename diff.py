@@ -138,7 +138,7 @@ def seq2seq_architecture(vocabulary_size, max_length_summary, input_sequences, o
     model.summary()
     # model.save('data/model.h5')
     model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['acc'])
-    history = model.fit([input_sequences, output_sequences], numpy.expand_dims(target_sequences, -1),
+    history = model.fit(x=[input_sequences, output_sequences], y=numpy.expand_dims(target_sequences, -1),
                         batch_size=batch_size, epochs=epochs)
 
     # inference
@@ -169,9 +169,9 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, vocabulary_si
     stop_condition = False
 
     while not stop_condition:
-        output_token, h, c = decoder_model.predict(x=[target_sequence] + states_value)
+        candidates, h, c = decoder_model.predict(x=[target_sequence] + states_value)
 
-        predicted_word_index = numpy.argmax(output_token[0, 0, :])
+        predicted_word_index = numpy.argmax(candidates)
         predicted_word = idx2word[predicted_word_index]
         prediction.append(predicted_word)
 
