@@ -1,13 +1,8 @@
 import numpy as np
 from random import randint
-from numpy import array
-from numpy import argmax
-from numpy import array_equal
 from keras.utils import to_categorical
 from keras.models import Model
-from keras.layers import Input
-from keras.layers import LSTM
-from keras.layers import Dense
+from keras.layers import Input, LSTM, Dense
 import matplotlib.pyplot as plt
 
 def generate_sequence(length, n_unique):
@@ -33,9 +28,9 @@ def generate_dataset(input_sample_size, output_sample_size, sample_token_size, n
         X2.append(tar_in_encoded)
         y.append(tar_encoded)
 
-    X1 = np.squeeze(array(X1), axis=1)  # removes single-dimensional entries (2,1,6,10) -> (2,6,10)
-    X2 = np.squeeze(array(X2), axis=1)
-    y = np.squeeze(array(y), axis=1)
+    X1 = np.squeeze(np.array(X1), axis=1)  # removes single-dimensional entries (2,1,6,10) -> (2,6,10)
+    X2 = np.squeeze(np.array(X2), axis=1)
+    y = np.squeeze(np.array(y), axis=1)
 
     return X1, X2, y
 
@@ -70,19 +65,19 @@ def predict_sequence(inf_encoder_model, inf_decoder_model, input_sequence, outpu
     state = inf_encoder_model.predict(input_sequence)  # get input through encoder
 
     # generate start token, first input to decoder
-    target_seq = array([0.0 for _ in range(sample_token_size)]).reshape(1, 1, sample_token_size)
+    target_seq = np.array([0.0 for _ in range(sample_token_size)]).reshape(1, 1, sample_token_size)
     prediction = list()  # prediction storage, updated token by token
 
     for t in range(output_sample_size):
         # predict next char
         yhat, h, c = inf_decoder_model.predict([target_seq] + state)
-        predicted_token = argmax(yhat[0, 0, :])
+        predicted_token = np.argmax(yhat[0, 0, :])
         prediction.append(predicted_token)  # possibility distribution for each possible token
 
         state = [h, c]  # update state
         target_seq = yhat  # update target sequence, next input for decoder
 
-    return array(prediction)
+    return np.array(prediction)
 
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
@@ -115,17 +110,17 @@ train_model, inf_encoder_model, inf_decoder_model = define_models(sample_token_s
 train_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['acc'])
 history = train_model.fit([X1, X2], y, epochs=epochs, validation_split=0.1)
 
-history_dict = history.history
-gprah_epochs = range(1, epochs + 1)
-plot_acc(history_dict, gprah_epochs)
+#history_dict = history.history
+#gprah_epochs = range(1, epochs + 1)
+#plot_acc(history_dict, gprah_epochs)
 
 # validation
 total, correct = 100, 0
 for _ in range(total):
     X1, X2, y = generate_dataset(input_sample_size, output_sample_size, sample_token_size, 1)
-    target = [argmax(vector) for vector in y[0]]
+    target = [np.argmax(vector) for vector in y[0]]
     prediction = predict_sequence(inf_encoder_model, inf_decoder_model, X1, output_sample_size, sample_token_size)
-    if array_equal(target, prediction):
+    if np.array_equal(target, prediction):
         correct += 1
 
 print('Accuracy: %.2f%%' % (float(correct)/float(total)*100.0))
@@ -133,7 +128,7 @@ print('Accuracy: %.2f%%' % (float(correct)/float(total)*100.0))
 # check
 for _ in range(5):
     X1, X2, y = generate_dataset(input_sample_size, output_sample_size, sample_token_size, 1)
-    input = [argmax(vector) for vector in X1[0]]
-    target = [argmax(vector) for vector in y[0]]
+    input = [np.argmax(vector) for vector in X1[0]]
+    target = [np.argmax(vector) for vector in y[0]]
     prediction = predict_sequence(inf_encoder_model, inf_decoder_model, X1, output_sample_size, sample_token_size)
     print('X=%s y=%s, prediction=%s' % (input, target, prediction))

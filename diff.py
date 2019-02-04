@@ -14,17 +14,17 @@ def read_data():
     summaries = []
     articles = []
 
-    summary_files = os.listdir('data/summaries/')
+    summary_files = os.listdir('data/test_summaries/')
     for file in summary_files:
-        f = codecs.open('data/summaries/'+file, encoding='utf-8')
+        f = codecs.open('data/test_summaries/'+file, encoding='utf-8')
         tmp = []
         for line in f:
             tmp.append(line)
         summaries.append(' '.join(tmp))
 
-    article_files = os.listdir('data/articles/')
+    article_files = os.listdir('data/test_articles/')
     for file in article_files:
-        f = codecs.open('data/articles/'+file, encoding='utf-8')
+        f = codecs.open('data/test_articles/'+file, encoding='utf-8')
         tmp = []
         for line in f:
             tmp.append(line)
@@ -111,7 +111,7 @@ def seq2seq_architecture(vocabulary_size, max_length_summary, input_sequences, o
     latent_size = 128  # number of units (output dimensionality)
     embedding_size = 48  # word vector size
     batch_size = 64
-    epochs = 50
+    epochs = 5
 
     # encoder
     encoder_inputs = Input(shape=(None, ))
@@ -147,11 +147,12 @@ def seq2seq_architecture(vocabulary_size, max_length_summary, input_sequences, o
     decoder_state_input_h = Input(shape=(latent_size,))
     decoder_state_input_c = Input(shape=(latent_size,))
     decoder_input_states = [decoder_state_input_h, decoder_state_input_c]
-    decoder_out, decoder_h, decoder_c = decoder_LSTM(decoder_inputs, initial_state=decoder_input_states)
+    #decoder_outputs, decoder_h, decoder_c = decoder_LSTM(decoder_inputs, initial_state=decoder_input_states)  # TODO
+    decoder_outputs, decoder_h, decoder_c = decoder_LSTM(decoder_embeddings, initial_state=decoder_input_states)
     decoder_states = [decoder_h, decoder_c]
-    decoder_out = decoder_dense(decoder_out)
+    decoder_outputs = decoder_dense(decoder_outputs)
 
-    decoder_model = Model(inputs=[decoder_inputs] + decoder_input_states, outputs=[decoder_out] + decoder_states)
+    decoder_model = Model(inputs=[decoder_inputs] + decoder_input_states, outputs=[decoder_outputs] + decoder_states)
 
     return history, model, encoder_model, decoder_model
 
@@ -161,15 +162,15 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, vocabulary_si
     states_value = encoder_model.predict(input_sequence)
 
     # generate empty target sequence of length 1
-    target_sequence = numpy.zeros((1, 1, vocabulary_size))
+    target_sequence = numpy.zeros((1, vocabulary_size))
     # populate the first character of target sequence with the start character
-    target_sequence[0, 0, word2idx['<START>']] = 1
+    target_sequence[0, word2idx['<START>']] = 1
 
     prediction = []
     stop_condition = False
 
     while not stop_condition:
-        candidates, h, c = decoder_model.predict(x=[target_sequence] + states_value)
+        candidates, h, c = decoder_model.predict([target_sequence] + states_value)
 
         predicted_word_index = numpy.argmax(candidates)
         predicted_word = idx2word[predicted_word_index]
@@ -179,8 +180,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, vocabulary_si
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        target_sequence = numpy.zeros((1, 1, vocabulary_size))
-        target_sequence[0, 0, predicted_word_index] = 1
+        target_sequence = numpy.zeros((1, vocabulary_size))
+        target_sequence[0, predicted_word_index] = 1
 
         states_value = [h, c]
 
@@ -226,8 +227,7 @@ X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='
 Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
 # training model, encoder, decoder model needed for inference
-history, model, encoder_model, decoder_model = seq2seq_architecture(vocabulary_size, max_length_summary,
-                                                                    X_article, X_summary, Y_target)
+history, model, encoder_model, decoder_model = seq2seq_architecture(vocabulary_size, max_length_summary, X_article, X_summary, Y_target)
 
 # inference
 for index in range(10):
