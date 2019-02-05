@@ -112,7 +112,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+    _, state_h = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
     # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output and cell state for the last input time step
     encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
@@ -122,7 +122,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
                                    mask_zero=False)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
-    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_gru = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
