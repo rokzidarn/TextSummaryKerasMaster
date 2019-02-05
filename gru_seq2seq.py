@@ -138,7 +138,6 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
 def inference(model):
     encoder_model = model.get_layer('Encoder-Model')
 
-    # TODO: do decoder latent_size must equal decoder embedding_size
     latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # gets embedding size, not latent size
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
@@ -223,8 +222,6 @@ latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 32
 epochs = 8
-
-# TODO: GRU -> LSTM
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)

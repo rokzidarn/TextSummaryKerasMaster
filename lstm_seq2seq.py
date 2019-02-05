@@ -112,10 +112,11 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
+    _, state_h, state_c = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
     # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output and cell state for the last input time step
-    encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
+    encoder_states = [state_h, state_c]
+    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
@@ -125,8 +126,8 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_gru = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
-    decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
+    decoder_lstm_outputs, _, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_lstm_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
@@ -143,18 +144,22 @@ def inference(model):
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
-    gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
-    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
-    decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
+
+    inference_state_h_input = Input(shape=(latent_dim,), name='hidden_state_input')
+    inference_state_c_input = Input(shape=(latent_dim,), name='cell_state_input')
+    lstm_out, lstm_state_h_out, lstm_state_c_out = model.get_layer('Decoder-LSTM')(
+        [decoder_embeddings, inference_state_h_input, inference_state_c_input])
+    decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(lstm_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+    decoder_model = Model([decoder_inputs, inference_state_h_input, inference_state_c_input],
+                          [dense_out, lstm_state_h_out, lstm_state_c_out])
 
     return encoder_model, decoder_model
 
 
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
     # encode the input as state vectors
-    states_value = encoder_model.predict(input_sequence)
+    states_value_h, states_value_c = encoder_model.predict(input_sequence)
     # populate the first character of target sequence with the start character
     target_sequence = numpy.array(word2idx['<START>']).reshape(1, 1)
 
@@ -162,9 +167,11 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
 
     while not stop_condition:
-        candidates, state = decoder_model.predict([target_sequence, states_value])
+        candidates, state_h, state_c = decoder_model.predict([target_sequence, states_value_h, states_value_c])
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
+        # TODO: if <UNK> search in similar location in input sequence
+        # TODO: if predicted is the same as previous, get next candidate
         predicted_word = idx2word[predicted_word_index]
         prediction.append(predicted_word)
 
@@ -172,7 +179,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        states_value = state
+        states_value_h = state_h
+        states_value_c = state_c
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
@@ -223,8 +231,6 @@ latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 32
 epochs = 8
-
-# TODO: GRU -> LSTM
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
