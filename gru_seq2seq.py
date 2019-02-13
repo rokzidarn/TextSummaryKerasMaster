@@ -94,17 +94,15 @@ def one_hot_encode(sequences, vocabulary_size, max_length_summary):
 
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
-    val_acc = history_dict['val_acc']
 
     fig = plt.figure()
     plt.plot(epochs, acc, 'r', label='Training acc')
-    plt.plot(epochs, val_acc, 'g', label='Testing acc')
-    plt.title('Training and testing accuracy')
+    plt.title('Training accuracy')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    # fig.savefig('test.png')
+    # fig.savefig('train.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
@@ -130,7 +128,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy')
+    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy', metrics=['acc'])
 
     return seq2seq_model
 
@@ -229,6 +227,10 @@ seq2seq_model.summary()
 # model.save('data/seq2seq_model.h5')
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
+
+history_dict = history.history
+graph_epochs = range(1, epochs + 1)
+plot_acc(history_dict, graph_epochs)
 
 # inference
 encoder_model, decoder_model = inference(seq2seq_model)
