@@ -191,7 +191,7 @@ print('Max lengths of summary/article in dataset: ', max_length_summary, '/', ma
 
 all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
 fdist, word2idx, idx2word = build_vocabulary(all_tokens)
-vocabulary_size = len(fdist.items())  # without <PAD>, <START>, <END>, <UNK> tokens
+vocabulary_size = len(fdist.items())  # with <PAD>, <START>, <END>, <UNK> tokens
 
 print('Vocabulary size (number of all possible words): ', vocabulary_size)
 print('Most common words: ', fdist.most_common(10))
