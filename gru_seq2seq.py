@@ -191,7 +191,7 @@ print('Max lengths of summary/article in dataset: ', max_length_summary, '/', ma
 
 all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
 fdist, word2idx, idx2word = build_vocabulary(all_tokens)
-vocabulary_size = len(fdist.items())  # with <PAD>, <START>, <END>, <UNK> tokens
+vocabulary_size = len(word2idx.items())  # with <PAD>, <START>, <END>, <UNK> tokens
 
 print('Vocabulary size (number of all possible words): ', vocabulary_size)
 print('Most common words: ', fdist.most_common(10))
@@ -218,7 +218,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 32
+batch_size = 1
 epochs = 8
 
 # training
