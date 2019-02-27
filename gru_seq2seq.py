@@ -7,13 +7,16 @@ from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, LSTM, GRU, Dense, Embedding, TimeDistributed, BatchNormalization
+from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, TimeDistributed
 from keras import optimizers
 from keras.utils import to_categorical
+from keras.models import load_model
+from pickle import dump, load
 
 def read_data():
     summaries = []
     articles = []
+    titles = []
 
     ddir = 'data/test/'
     summary_files = os.listdir(ddir+'summaries/')
@@ -23,6 +26,7 @@ def read_data():
         for line in f:
             tmp.append(line)
         summaries.append(' '.join(tmp))
+        titles.append(file[:-4])
 
     article_files = os.listdir(ddir+'articles/')
     for file in article_files:
@@ -32,7 +36,7 @@ def read_data():
             tmp.append(line)
         articles.append(' '.join(tmp))
 
-    return summaries, articles
+    return titles, summaries, articles
 
 
 def clean_data(text):
@@ -97,13 +101,13 @@ def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
 
     fig = plt.figure()
-    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, acc, 'r')
     plt.title('Training accuracy')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    # fig.savefig('gru_seq2seq.png')
+    fig.savefig('data/models/gru_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
@@ -178,7 +182,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
 
 # MAIN
 
-summaries_read, articles_read = read_data()  # 1D array, each element is string of sentences, separated by newline
+# 1D array, each element is string of sentences, separated by newline
+titles, summaries_read, articles_read = read_data()
 
 # 2D array, array of summaries/articles, sub-arrays of words
 summaries_clean = [clean_data(summary) for summary in summaries_read]
@@ -213,8 +218,11 @@ for tmp in tmp_vectors:
 X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
 X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
 Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
-
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
+
+# serialize data, used for inference
+dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary],
+     open('data/models/serialized_data.pkl', 'wb'))
 
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
@@ -225,16 +233,20 @@ epochs = 8
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-# model.save('data/gru_seq2seq_model.h5')
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
+
+seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
 plot_acc(history_dict, graph_epochs)
 
 # inference
-encoder_model, decoder_model = inference(seq2seq_model)
+model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
+[titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = \
+    load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
+encoder_model, decoder_model = inference(model)
 
 # testing
 for index in range(5):
@@ -242,6 +254,7 @@ for index in range(5):
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
 
     print('-')
-    print('Article:', articles_clean[index])
     print('Summary:', summaries_clean[index])
     print('Prediction:', prediction)
+
+# evaluation using ROUGE
