@@ -15,17 +15,18 @@ def read_data():
     summaries = []
     articles = []
 
-    summary_files = os.listdir('data/test_summaries/')
+    ddir = 'data/test/'
+    summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
-        f = codecs.open('data/test_summaries/'+file, encoding='utf-8')
+        f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
         tmp = []
         for line in f:
             tmp.append(line)
         summaries.append(' '.join(tmp))
 
-    article_files = os.listdir('data/test_articles/')
+    article_files = os.listdir(ddir+'articles/')
     for file in article_files:
-        f = codecs.open('data/test_articles/'+file, encoding='utf-8')
+        f = codecs.open(ddir+'articles/'+file, encoding='utf-8')
         tmp = []
         for line in f:
             tmp.append(line)
@@ -102,7 +103,7 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    # fig.savefig('train.png')
+    # fig.savefig('gru_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
@@ -224,7 +225,7 @@ epochs = 8
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-# model.save('data/seq2seq_model.h5')
+# model.save('data/gru_seq2seq_model.h5')
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 

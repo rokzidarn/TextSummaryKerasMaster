@@ -21,8 +21,8 @@ def write_data(title, dir, text):
     i = 0
     while i < len(list(raw_sentences)):
         s = raw_sentences[i]
-        if (s[-2:] == "n." or s[-3:] == "št." or s[-3:] == "oz." or s[-4:] == "npr." or s[-3:] == "tj."
-                or s[-4:] == "izg." or s[-3:] == "sv." or s[-4:] == "lat." or s[-5:] == "angl.") and len(sentences) > 0:
+        if (s[-2:] == "n." or s[-3:] == "št." or s[-3:] == "oz." or s[-4:] == "npr." or s[-5:] == "angl."
+                or s[-4:] == "izg." or s[-3:] == "sv." or s[-4:] == "lat." or s[-3:] == "tj.") and len(sentences) > 0:
             # fix special case sentences
             prev = sentences[-1]
             sentences.pop()
@@ -50,7 +50,7 @@ exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici
                       "Izbrana bibliografija", "Literatura", "Sklici in opombe", "Zunanje povezave in viri"]
 
 urls, titles, articles, summaries = [], [], [], []
-limit = 500
+limit = 400
 
 for page in generated:
     global_article = []
