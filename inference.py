@@ -34,7 +34,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     while not stop_condition:
         candidates, state = decoder_model.predict([target_sequence, states_value])
 
-        predicted_word_index = numpy.argmax(candidates)  # greedy search
+        predicted_word_index = numpy.argmax(candidates)  # sample token (word), greedy search
         predicted_word = idx2word[predicted_word_index]
         prediction.append(predicted_word)
 
@@ -42,8 +42,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        states_value = state
-        target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
+        states_value = state  # update states
+        target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # update target sequence, previous character
 
     return prediction[:-1]
 

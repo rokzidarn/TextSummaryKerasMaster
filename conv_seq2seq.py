@@ -7,7 +7,7 @@ from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, TimeDistributed
+from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, Dropout, Conv1D, MaxPooling1D, Flatten
 from keras import optimizers
 from keras.utils import to_categorical
 from keras.models import load_model
@@ -110,24 +110,25 @@ def plot_acc(history_dict, epochs):
     fig.savefig('data/models/gru_seq2seq.png')
 
 
-def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
-    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
+def seq2seq_architecture(max_length_article, latent_size, embedding_size, vocabulary_size):
+    encoder_inputs = Input(shape=(max_length_article,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
-    # returns last state (hidden state), discard encoder_outputs, only keep the states
-    # return state = returns the hidden state output for the last input time step
-    encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
+    encoder_conv = Conv1D(filters=32, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
+    encoder_drop = Dropout(0.25)(encoder_conv)
+    encoder_pool = MaxPooling1D(pool_size=4)(encoder_drop)
+    encoder_drop = Dropout(0.25)(encoder_pool)
+    encoder_flatten = Flatten()(encoder_drop)
+    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
+    # TODO: do filters, kernel_size and pool_size must be set so the output shape matches initial_state in decoder
 
-    decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
+    decoder_inputs = Input(shape=(None,), name='Decoder-Input')
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
                                    mask_zero=False)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
     decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
-    # return state needed for inference
-    # return_sequence = returns the hidden state output for each input time step
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
     decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -184,6 +185,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
 
 # 1D array, each element is string of sentences, separated by newline
 titles, summaries_read, articles_read = read_data()
+num_samples = len(titles)
 
 # 2D array, array of summaries/articles, sub-arrays of words
 summaries_clean = [clean_data(summary) for summary in summaries_read]
@@ -231,19 +233,19 @@ batch_size = 1
 epochs = 8
 
 # training
-seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
+seq2seq_model = seq2seq_architecture(max_length_article, latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 
-seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
+seq2seq_model.save('data/models/conv_seq2seq_model.h5')  # saves model
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
 plot_acc(history_dict, graph_epochs)
 
 # inference
-model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
+model = load_model('data/models/conv_seq2seq_model.h5')  # loads saved model
 [titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = \
     load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
 encoder_model, decoder_model = inference(model)
