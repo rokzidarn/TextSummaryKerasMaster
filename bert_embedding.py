@@ -5,10 +5,10 @@ bert_path = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
 
 
 class BertLayer(tf.layers.Layer):
-    def __init__(self, n_fine_tune_layers=10, **kwargs):
+    def __init__(self, vocabulary_size, n_fine_tune_layers=10, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
-        self.output_size = 768
+        self.output_size = (vocabulary_size, 768)
         super(BertLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -44,4 +44,4 @@ class BertLayer(tf.layers.Layer):
         return result
 
     def compute_output_shape(self, input_shape):
-        return input_shape[0], self.output_size
+        return input_shape[0], self.output_size[0], self.output_size[1]

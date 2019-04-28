@@ -1,5 +1,6 @@
 import os
 import codecs
+import numpy
 from pprint import pprint
 import matplotlib.pyplot as plt
 from keras import optimizers
@@ -170,10 +171,10 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
     enc_in_id = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-ids")  # None
     enc_in_mask = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Masks")
     enc_in_segment = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Segment-ids")
-    bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]  # TODO: dimensions mismatch?
+    bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]
 
     encoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_encoder_inputs)
-    print(encoder_embeddings.shape);exit()
+    print(encoder_embeddings.shape);exit()  # TODO: dimensions mismatch?
     encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     encoder_model = tf.keras.models.Model(inputs=bert_encoder_inputs, outputs=state_h, name='Encoder-Model')
@@ -197,6 +198,49 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
     return seq2seq_model
 
 
+def inference(model):
+    encoder_model = model.get_layer('Encoder-Model')
+
+    latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # TODO: bert_layer_1, latent_dim = 768
+    dec_in_id = model.get_layer("Decoder-Input-ids").input
+    dec_in_mask = model.get_layer("Decoder-Input-Masks").input
+    dec_in_segment = model.get_layer("Decoder-Input-Segment-ids").input
+    bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
+    decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(bert_decoder_inputs)  # TODO: bert_layer_1
+
+    decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
+    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='hidden_state_input')
+    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
+    decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
+    dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
+    decoder_model = tf.keras.models.Model([bert_decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+
+    return encoder_model, decoder_model
+
+
+def predict_sequence(encoder_model, decoder_model, input, max_len, tokenizer):
+    states_value = encoder_model.predict(input)  # input_id, input_mask, segment_id tuple
+    target_sequence = numpy.array(tokenizer.convert_tokens_to_ids("[CLS]")).reshape(1, 1)  # TODO: Bert tokens as arrays
+
+    prediction = []
+    stop_condition = False
+
+    while not stop_condition:
+        candidates, state = decoder_model.predict([target_sequence, states_value])
+
+        predicted_word_index = numpy.argmax(candidates)
+        predicted_word = tokenizer.convert_ids_to_tokens(predicted_word_index)
+        prediction.append(predicted_word)
+
+        if (predicted_word == "[SEP]") or (len(prediction) > max_len):
+            stop_condition = True
+
+        states_value = state
+        target_sequence = numpy.array(predicted_word_index).reshape(1, 1)
+
+    return prediction[:-1]
+
+
 # MAIN
 
 sess = tf.Session()
@@ -207,17 +251,13 @@ article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
 summary_tokens, max_len_summary = tokenize_samples(tokenizer, summaries)
 vocabulary_size = len(tokenizer.vocab)
 
-print(article_tokens)
-print(summary_tokens)
-print(max_len_article, max_len_summary, vocabulary_size)
-
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
 
-print(article_input_ids)
-print(summary_input_ids)
-
 latent_size = 96
+batch_size = 1
+epochs = 8
+
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
 
