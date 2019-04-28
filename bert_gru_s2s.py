@@ -162,7 +162,34 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
+def seq2seq_architecture(latent_size, vocabulary_size):
+    enc_in_id = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-ids")  # TODO: max_seq_length on all Inputs?
+    enc_in_mask = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-Masks")
+    enc_in_segment = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-Segment-ids")
+    bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]  # TODO: dimensions mismatch?
 
+    encoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_encoder_inputs)
+    encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
+    _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+    encoder_model = tf.keras.models.Model(inputs=bert_encoder_inputs, outputs=state_h, name='Encoder-Model')
+    encoder_outputs = encoder_model(bert_encoder_inputs)
+
+    dec_in_id = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-ids")
+    dec_in_mask = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-Masks")
+    dec_in_segment = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-Segment-ids")
+    bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
+
+    decoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_decoder_inputs)
+    decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
+    decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
+    decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
+    decoder_outputs = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
+
+    seq2seq_model = tf.keras.models.Model([bert_encoder_inputs, bert_decoder_inputs], decoder_outputs)
+    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy', metrics=['acc'])
+
+    return seq2seq_model
 
 
 # MAIN
@@ -174,8 +201,17 @@ max_len_article = 20  # TODO
 max_len_summary = 20  # TODO
 
 tokenizer = create_tokenizer_from_hub_module(sess)
+vocabulary_size = len(tokenizer.vocab)
+print(vocabulary_size)
 
 article_input_ids, article_input_masks, article_segment_ids = convert_samples_to_features(
     tokenizer, articles, max_len_article)
 
-print(article_input_ids)
+exit()
+
+latent_size = 96
+seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
+seq2seq_model.summary()
+
+initialize_vars(sess)
+
