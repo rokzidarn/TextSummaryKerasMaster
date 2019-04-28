@@ -7,9 +7,8 @@ from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, TimeDistributed
+from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 from keras import optimizers
-from keras.utils import to_categorical
 from keras.models import load_model
 from pickle import dump, load
 

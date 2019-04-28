@@ -47,7 +47,7 @@ class BertLayer(tf.layers.Layer):
         return input_shape[0], self.output_size
 
 
-def create_tokenizer_from_hub_module(bert_path):
+def create_tokenizer_from_hub_module(sess, bert_path):
     bert_module = hub.Module(bert_path)  # get the vocab file and casing info from the Hub module
     tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
     vocab_file, do_lower_case = sess.run(
@@ -131,13 +131,13 @@ sess = tf.Session()
 bert_path = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
 
 max_seq_length = 256
-tokenizer = create_tokenizer_from_hub_module(bert_path)
+tokenizer = create_tokenizer_from_hub_module(sess, bert_path)
 print(tokenizer.tokenize("This here's an example of using the BERT tokenizer. It seems to be working very well."))
 
 texts = [
  "One of the all-time great science fiction works, as visionary and thought-provoking as Blade Runner or even Gilliam's own Brazil. Willis gives his best performance here, but he's outdone by Pitt's incredibly frenetic turn that's unlike anything he's done before or since. Even Stowe isn't out of her league here, though. The story is very layered and offers quite a lot to think about. The climactic scene is beautifully magnificent, and the last lines fit perfectly. The scenes in the mental hospital are creepy and yet so funny in their own way. Lots of dark humour on display here. Fantastic production design and suitably bizarre cinematography. In my top ten.",
  "Proof why Hollywood conventions are in place. Stale dialogue, underdeveloped and flat characters and a disjointed storyline are only part of the problems with this gangster classic wannabe. An attempt to be daring and different but this appears to be a slap-together attempt at recreating the magic of Arthur Penn 's Bonnie and Clyde (1967) and George Roy Hill 's Butch Cassidy and the Sundance Kid (1969)- truly innovative filmmakers and films - but falling well below the bar. Problems with storylines being self-explanatory result in the need for a voiceover to explain problem sections. The editing appears again to be an attempt to duplicate the previous classics but is occasionally disjointed and cause more problems for me technically. Unnecessary shots are thrown in to justify the filming of them but would have better served the viewer by sitting on the cutting room floor. Stills, black & white montages and period music are thrown in from time to time in attempts to either be different or to cover up for scenes that can't transition well or to replace scenes that just didn't work at all and again are reminiscent of Butch Cassidy and the Sundance Kid (1969).<br /><br />Overly dramatic pauses between sentences, random shots of surrounding scenery that wasn't needed for storytelling plus over-the-top acting of bit players and supporting actors was reminiscent of the backyard camcorder directors of the late 1980's - I was left wondering who was in charge of this film during production and during post-production. The playing of music in most",
- 'This is an entertaining look at the Gospel as presented by Johnny Cash (adorned in black, of course) who sings a lot and narrates a bit also. If you like Johnny Cash, this film is quite enjoyable. Also note the blonde depiction of Jesus in this work...just for fun, try to think of five Jewish men who have blonde hair...? Anyway, its a fun presentation of the greatest and most important story of all.'
+ "This is an entertaining look at the Gospel as presented by Johnny Cash (adorned in black, of course) who sings a lot and narrates a bit also. If you like Johnny Cash, this film is quite enjoyable. Also note the blonde depiction of Jesus in this work...just for fun, try to think of five Jewish men who have blonde hair...? Anyway, its a fun presentation of the greatest and most important story of all."
 ]
 labels = np.array([0, 1, 1]).reshape(-1, 1)
 
