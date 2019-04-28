@@ -1,13 +1,7 @@
 import os
-import nltk
 import codecs
-import itertools
-import numpy
 from pprint import pprint
 import matplotlib.pyplot as plt
-from keras.preprocessing.sequence import pad_sequences
-from keras.models import Model
-from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 from keras import optimizers
 from keras.models import load_model
 from pickle import dump, load
@@ -112,8 +106,18 @@ def create_tokenizer_from_hub_module(sess):
     return FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 
-def convert_sample(tokenizer, sample, max_seq_length):
-    words = tokenizer.tokenize(sample)
+def tokenize_samples(tokenizer, samples):
+    words = []
+
+    for sample in samples:
+        words.append(tokenizer.tokenize(sample))
+
+    max_seq_length = len(max(words, key=len))
+
+    return words, max_seq_length
+
+
+def convert_sample(words, max_seq_length):
     if len(words) > max_seq_length - 2:
         words = words[0:(max_seq_length - 2)]
 
@@ -143,11 +147,11 @@ def convert_sample(tokenizer, sample, max_seq_length):
     return input_ids, input_mask, segment_ids
 
 
-def convert_samples_to_features(tokenizer, samples, max_seq_length):
+def vectorize_features(samples, max_seq_length):
     input_ids, input_masks, segment_ids = [], [], []
 
     for sample in samples:
-        input_id, input_mask, segment_id = convert_sample(tokenizer, sample, max_seq_length)
+        input_id, input_mask, segment_id = convert_sample(sample, max_seq_length)
         input_ids.append(input_id)
         input_masks.append(input_mask)
         segment_ids.append(segment_id)
@@ -162,13 +166,14 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size):
-    enc_in_id = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-ids")  # TODO: max_seq_length on all Inputs?
-    enc_in_mask = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-Masks")
-    enc_in_segment = tf.keras.layers.Input(shape=(None,), name="Encoder-Input-Segment-ids")
+def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary):
+    enc_in_id = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-ids")  # None
+    enc_in_mask = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Masks")
+    enc_in_segment = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Segment-ids")
     bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]  # TODO: dimensions mismatch?
 
     encoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_encoder_inputs)
+    print(encoder_embeddings.shape);exit()
     encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     encoder_model = tf.keras.models.Model(inputs=bert_encoder_inputs, outputs=state_h, name='Encoder-Model')
@@ -195,23 +200,25 @@ def seq2seq_architecture(latent_size, vocabulary_size):
 # MAIN
 
 sess = tf.Session()
+tokenizer = create_tokenizer_from_hub_module(sess)
 
 titles, summaries, articles = read_data()
-max_len_article = 20  # TODO
-max_len_summary = 20  # TODO
-
-tokenizer = create_tokenizer_from_hub_module(sess)
+article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
+summary_tokens, max_len_summary = tokenize_samples(tokenizer, summaries)
 vocabulary_size = len(tokenizer.vocab)
-print(vocabulary_size)
 
-article_input_ids, article_input_masks, article_segment_ids = convert_samples_to_features(
-    tokenizer, articles, max_len_article)
+print(article_tokens)
+print(summary_tokens)
+print(max_len_article, max_len_summary, vocabulary_size)
 
-exit()
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
+
+print(article_input_ids)
+print(summary_input_ids)
 
 latent_size = 96
-seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
+seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
 
 initialize_vars(sess)
-
