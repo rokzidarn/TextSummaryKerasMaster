@@ -2,7 +2,6 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import numpy as np
 from bert.tokenization import FullTokenizer
-from tensorflow.keras import backend as K
 
 
 class BertLayer(tf.layers.Layer):
@@ -34,7 +33,7 @@ class BertLayer(tf.layers.Layer):
         super(BertLayer, self).build(input_shape)
 
     def call(self, inputs):
-        inputs = [K.cast(x, dtype="int32") for x in inputs]
+        inputs = [tf.keras.backend.cast(x, dtype="int32") for x in inputs]
         input_ids, input_mask, segment_ids = inputs
         bert_inputs = dict(
             input_ids=input_ids, input_mask=input_mask, segment_ids=segment_ids
@@ -125,7 +124,7 @@ def initialize_vars(sess):
     sess.run(tf.local_variables_initializer())
     sess.run(tf.global_variables_initializer())
     sess.run(tf.tables_initializer())
-    K.set_session(sess)
+    tf.keras.backend.set_session(sess)
 
 
 sess = tf.Session()

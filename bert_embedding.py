@@ -1,6 +1,5 @@
 import tensorflow as tf
 import tensorflow_hub as hub
-from tensorflow.keras import backend as K
 
 bert_path = "https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1"
 
@@ -34,7 +33,7 @@ class BertLayer(tf.layers.Layer):
         super(BertLayer, self).build(input_shape)
 
     def call(self, inputs):
-        inputs = [K.cast(x, dtype="int32") for x in inputs]
+        inputs = [tf.keras.backend.cast(x, dtype="int32") for x in inputs]
         input_ids, input_mask, segment_ids = inputs
         bert_inputs = dict(
             input_ids=input_ids, input_mask=input_mask, segment_ids=segment_ids
