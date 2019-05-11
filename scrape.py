@@ -24,17 +24,23 @@ def write_data(title, dir, text):
         if (s[-2:] == "n." or s[-3:] == "št." or s[-3:] == "oz." or s[-4:] == "npr." or s[-5:] == "angl."
                 or s[-4:] == "izg." or s[-3:] == "sv." or s[-4:] == "lat." or s[-3:] == "tj.") and len(sentences) > 0:
             # fix special case sentences
-            prev = sentences[-1]
-            sentences.pop()
-            sentences.append(prev + " " + s + " " + raw_sentences[i + 1])
-            i += 1
+            try:
+                prev = sentences[-1]
+                sentences.pop()
+                sentences.append(prev + " " + s + " " + raw_sentences[i + 1])
+                i += 1
+            except:
+                continue
         else:
             sentences.append(s)
         i += 1
 
-    with codecs.open('data/'+dir+'/'+title+'.txt', 'w', encoding='utf8') as f:  # write to file
-        for item in sentences:
-            f.write("{}\n".format(item))
+        try:
+            with codecs.open('data/'+dir+'/'+title+'.txt', 'w', encoding='utf8') as f:  # write to file
+                for item in sentences:
+                    f.write("{}\n".format(item))
+        except:
+            continue
 
 
 # MAIN
@@ -45,12 +51,12 @@ category_names = ['Category:Naravoslovje', 'Category:Družboslovje', 'Category:F
                   'Category:Ljudje', 'Category:Tehnika', 'Category:Umetnost', 'Category:Zgodovina']
 category = pywikibot.Category(site, category_names[0])
 
-generated = pagegenerators.CategorizedPageGenerator(category, recurse=5)
+generated = pagegenerators.CategorizedPageGenerator(category, recurse=10)
 exclusion_sections = ["Glej tudi", "Viri", "Zunanje povezave", "Opombe", "Sklici", "Viri, dodatno branje",
                       "Izbrana bibliografija", "Literatura", "Sklici in opombe", "Zunanje povezave in viri"]
 
 urls, titles, articles, summaries = [], [], [], []
-limit = 400
+limit = 500
 
 for page in generated:
     global_article = []
@@ -68,7 +74,7 @@ for page in generated:
 
     print(".", end="", flush=True)
 
-    if 800 < article_length < 1600:  # min-max length of article
+    if 600 < article_length < 2000:  # min-max length of article
         limit = limit - 1
 
         titles.append(title)
