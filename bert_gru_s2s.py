@@ -3,7 +3,6 @@ import codecs
 import numpy
 from pprint import pprint
 import matplotlib.pyplot as plt
-from keras import optimizers
 from keras.models import load_model
 from pickle import dump, load
 import tensorflow as tf
@@ -13,7 +12,7 @@ from bert.tokenization import FullTokenizer
 
 
 class BertLayer(tf.layers.Layer):
-    def __init__(self, n_fine_tune_layers=10, **kwargs):
+    def __init__(self, n_fine_tune_layers=3, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
         self.output_size = 768
@@ -47,7 +46,7 @@ class BertLayer(tf.layers.Layer):
             input_ids=input_ids, input_mask=input_mask, segment_ids=segment_ids
         )
         result = self.bert(inputs=bert_inputs, signature="tokens", as_dict=True)[
-            "pooled_output"
+            "sequence_output"
         ]
         return result
 
@@ -173,8 +172,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
     enc_in_segment = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Segment-ids")
     bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]
 
-    encoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_encoder_inputs)
-    print(encoder_embeddings.shape);exit()  # TODO: dimensions mismatch?
+    encoder_embeddings = BertLayer(name='Encoder-Bert-Layer')(bert_encoder_inputs)
     encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     encoder_model = tf.keras.models.Model(inputs=bert_encoder_inputs, outputs=state_h, name='Encoder-Model')
@@ -185,15 +183,17 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
     dec_in_segment = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-Segment-ids")
     bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
 
-    decoder_embeddings = BertLayer(n_fine_tune_layers=3)(bert_decoder_inputs)
+    decoder_embeddings = BertLayer(name='Decoder-Bert-Layer')(bert_decoder_inputs)
     decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
     decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
     decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
     decoder_outputs = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
-    seq2seq_model = tf.keras.models.Model([bert_encoder_inputs, bert_decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy', metrics=['acc'])
+    seq2seq_model = tf.keras.models.Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
+                                                  dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
+    seq2seq_model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy',
+                          metrics=['acc'])
 
     return seq2seq_model
 
@@ -201,12 +201,12 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
 def inference(model):
     encoder_model = model.get_layer('Encoder-Model')
 
-    latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # TODO: bert_layer_1, latent_dim = 768
+    latent_dim = model.get_layer('Decoder-Bert-Layer').output_shape[-1]  # 768
     dec_in_id = model.get_layer("Decoder-Input-ids").input
     dec_in_mask = model.get_layer("Decoder-Input-Masks").input
     dec_in_segment = model.get_layer("Decoder-Input-Segment-ids").input
     bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
-    decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(bert_decoder_inputs)  # TODO: bert_layer_1
+    decoder_embeddings = model.get_layer('Decoder-Bert-Layer')(bert_decoder_inputs)
 
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
     gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='hidden_state_input')
@@ -260,5 +260,7 @@ epochs = 8
 
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
+
+exit()
 
 initialize_vars(sess)
