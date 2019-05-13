@@ -137,10 +137,10 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     return seq2seq_model
 
 
-def inference(model):
+def inference(model, latent_dim):
     encoder_model = model.get_layer('Encoder-Model')
 
-    latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # gets embedding size, not latent size
+    # latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # gets embedding size, not latent size
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
@@ -225,14 +225,14 @@ dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary
 
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
-embedding_size = 96  # word vector size
+embedding_size = 128  # word vector size
 batch_size = 1
 epochs = 8
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
+history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 
 seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
@@ -245,7 +245,7 @@ plot_acc(history_dict, graph_epochs)
 model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
 [titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = \
     load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
-encoder_model, decoder_model = inference(model)
+encoder_model, decoder_model = inference(model, latent_size)
 
 # testing
 for index in range(5):

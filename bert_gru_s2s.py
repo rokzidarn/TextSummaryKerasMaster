@@ -198,10 +198,10 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
     return seq2seq_model
 
 
-def inference(model):
+def inference(model, latent_dim):
     encoder_model = model.get_layer('Encoder-Model')
 
-    latent_dim = model.get_layer('Decoder-Bert-Layer').output_shape[-1]  # 768
+    # latent_dim = model.get_layer('Decoder-Bert-Layer').output_shape[-1]  # 768
     dec_in_id = model.get_layer("Decoder-Input-ids").input
     dec_in_mask = model.get_layer("Decoder-Input-Masks").input
     dec_in_segment = model.get_layer("Decoder-Input-Segment-ids").input
@@ -213,7 +213,8 @@ def inference(model):
     gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
     decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = tf.keras.models.Model([bert_decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+    decoder_model = tf.keras.models.Model([dec_in_id, dec_in_mask, dec_in_segment, gru_inference_state_input],
+                                          [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
@@ -261,6 +262,11 @@ epochs = 8
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
 
-exit()
-
 initialize_vars(sess)
+
+# TODO: model.fit
+#seq2seq_model.fit([train_input_ids, train_input_masks, train_segment_ids], labels, epochs=10, batch_size=16)
+
+encoder_model, decoder_model = inference(seq2seq_model, latent_size)
+
+# TODO: predict
