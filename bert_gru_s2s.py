@@ -219,8 +219,9 @@ def inference(model, latent_dim):
     return encoder_model, decoder_model
 
 
-def predict_sequence(encoder_model, decoder_model, input, max_len, tokenizer):
-    states_value = encoder_model.predict(input)  # input_id, input_mask, segment_id tuple
+def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
+    input_ids, input_masks, segment_ids = inputs
+    states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     target_sequence = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
 
     prediction = []
@@ -270,7 +271,8 @@ vocabulary_size = len(tokenizer.vocab)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
-# TODO: create target_input_ids, target_masks, target_segment_ids  # ahead by one timestep
+# TODO: ahead by one timestep
+target_input_ids, target_masks, target_segment_ids = [], [], []
 
 latent_size = 96
 batch_size = 1
@@ -281,9 +283,18 @@ seq2seq_model.summary()
 
 initialize_vars(sess)
 
-# TODO: model.fit
-#seq2seq_model.fit([train_input_ids, train_input_masks, train_segment_ids], labels, epochs=10, batch_size=16)
+# TODO: model.fit, numpy.expand_dims(target, -1)
+seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
+                   summary_input_ids, summary_input_masks, summary_segment_ids],
+                  [target_input_ids, target_masks, target_segment_ids], epochs=epochs, batch_size=batch_size)
 
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 
-# TODO: predict
+for i in range(5):
+    # TODO: predict
+    inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
+    prediction = predict_sequence(encoder_model, decoder_model, inputs, max_len_summary, tokenizer)
+
+    print('-')
+    print('Summary:', summary_tokens[i])
+    print('Prediction:', prediction)
