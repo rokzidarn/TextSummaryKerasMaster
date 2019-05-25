@@ -192,7 +192,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_
 
     seq2seq_model = tf.keras.models.Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
                                                   dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy',
+    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(lr=0.001), loss='sparse_categorical_crossentropy',
                           metrics=['acc'])
 
     return seq2seq_model
@@ -245,9 +245,10 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
 
 # MAIN
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
-
+"""
 words = tokenizer.tokenize("Pozdravljeni, gospod Rok. Dober dan tudi Vam!")
 idx = tokenizer.convert_tokens_to_ids(words)
 repeat = tokenizer.convert_ids_to_tokens(idx)
@@ -261,8 +262,7 @@ print(sidx, convert)
 
 vectorized = convert_sample(words, 30)
 print(vectorized)
-
-exit()
+"""
 
 titles, summaries, articles = read_data()
 article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
@@ -271,27 +271,30 @@ vocabulary_size = len(tokenizer.vocab)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
-# TODO: ahead by one timestep
-target_input_ids, target_masks, target_segment_ids = [], [], []
 
-latent_size = 96
-batch_size = 1
-epochs = 8
+target_input_ids, target_masks, target_segment_ids = [], [], []
+# TODO: https://stackoverflow.com/questions/50530100/keras-lstm-multi-output-model-predict-two-features-time-series
+
+for summary_input_id in summary_input_ids:
+    target_input_ids.append(summary_input_id[1:] + [0])
+
+latent_size = 32
+batch_size = 2
+epochs = 4
 
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
 
 initialize_vars(sess)
 
-# TODO: model.fit, numpy.expand_dims(target, -1)
 seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
                    summary_input_ids, summary_input_masks, summary_segment_ids],
-                  [target_input_ids, target_masks, target_segment_ids], epochs=epochs, batch_size=batch_size)
+                  numpy.expand_dims(target_input_ids, -1), epochs=epochs, batch_size=batch_size)
 
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
+exit()
 
 for i in range(5):
-    # TODO: predict
     inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
     prediction = predict_sequence(encoder_model, decoder_model, inputs, max_len_summary, tokenizer)
 
