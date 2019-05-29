@@ -26,7 +26,8 @@ class BertLayer(tf.layers.Layer):
         )
 
         trainable_vars = self.bert.variables
-        trainable_vars = [var for var in trainable_vars if not "/cls/" in var.name]
+        # trainable_vars = [var for var in trainable_vars if not "/cls/" in var.name]
+        trainable_vars = [var for var in trainable_vars if not "/cls/" in var.name and not "/pooler/" in var.name]
         trainable_vars = trainable_vars[-self.n_fine_tune_layers:]
 
         # Add to trainable weights
@@ -276,11 +277,12 @@ target_input_ids, target_masks, target_segment_ids = [], [], []
 # TODO: https://stackoverflow.com/questions/50530100/keras-lstm-multi-output-model-predict-two-features-time-series
 
 for summary_input_id in summary_input_ids:
-    target_input_ids.append(summary_input_id[1:] + [0])
+    target_input_id = numpy.append(summary_input_id[1:], 0)
+    target_input_ids.append(target_input_id)
 
 latent_size = 32
-batch_size = 2
-epochs = 4
+batch_size = 1
+epochs = 5
 
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
 seq2seq_model.summary()
@@ -292,7 +294,6 @@ seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
                   numpy.expand_dims(target_input_ids, -1), epochs=epochs, batch_size=batch_size)
 
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
-exit()
 
 for i in range(5):
     inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
