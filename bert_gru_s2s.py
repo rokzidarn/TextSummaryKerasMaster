@@ -119,17 +119,20 @@ def convert_sample(words, max_seq_length):
     if len(words) > max_seq_length - 2:
         words = words[0:(max_seq_length - 2)]
 
+    it = 1
     tokens = []
     segment_ids = []
     tokens.append("[CLS]")  # 101: start token
-    segment_ids.append(1)
+    segment_ids.append(it)
 
-    for token in words:
+    for token in words:  # TODO: sentence splitting, segments (use [SEP] token)
         tokens.append(token)
-        segment_ids.append(1)  # TODO: check segments (sentence splitting), first sentence == 1
+        segment_ids.append(it)
+        if token == "." or token == "!" or token == "?":  # check segments (sentence splitting), first sentence == 1
+            it += 1
 
     tokens.append("[SEP]")  # 102: end token
-    segment_ids.append(1)
+    segment_ids.append(it-1)
 
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
@@ -239,15 +242,17 @@ def inference(model, latent_dim):
 def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     input_ids, input_masks, segment_ids = inputs
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
-    target_sequence = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
+    it = 1
+
+    target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
     target_mask = numpy.array(1).reshape(1, 1)
-    target_segment = numpy.array(1).reshape(1, 1)
+    target_segment = numpy.array(it).reshape(1, 1)
 
     prediction = []
     stop_condition = False
 
     while not stop_condition:
-        candidates, state = decoder_model.predict([target_sequence, target_mask, target_segment, states_value])
+        candidates, state = decoder_model.predict([target_input, target_mask, target_segment, states_value])
 
         predicted_word_index = numpy.argmax(candidates)
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])
@@ -257,16 +262,19 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
             stop_condition = True
 
         states_value = state
-        target_sequence = numpy.array(predicted_word_index).reshape(1, 1)
+        target_input = numpy.array(predicted_word_index).reshape(1, 1)
         target_mask = numpy.array(1).reshape(1, 1)
-        target_segment = numpy.array(1).reshape(1, 1)
+
+        if predicted_word == "." or predicted_word == "!" or predicted_word == "?":
+            it += 1
+        target_segment = numpy.array(it).reshape(1, 1)
 
     return prediction[:-1]
 
 
 # MAIN
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
 sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
 
@@ -279,7 +287,7 @@ article_input_ids, article_input_masks, article_segment_ids = vectorize_features
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-latent_size = 96
+latent_size = 128
 batch_size = 1
 epochs = 8
 
