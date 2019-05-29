@@ -1,10 +1,7 @@
 import os
 import codecs
 import numpy
-from pprint import pprint
 import matplotlib.pyplot as plt
-from keras.models import load_model
-from pickle import dump, load
 import tensorflow as tf
 import tensorflow_hub as hub
 import numpy as np
@@ -124,14 +121,14 @@ def convert_sample(words, max_seq_length):
 
     tokens = []
     segment_ids = []
-    tokens.append("[CLS]")  # 101
+    tokens.append("[CLS]")  # 101: start token
     segment_ids.append(0)
 
     for token in words:
         tokens.append(token)
-        segment_ids.append(0)  # TODO: check segments, sentence splitting
+        segment_ids.append(0)  # TODO: check segments (sentence splitting), first sentence == 0
 
-    tokens.append("[SEP]")  # 102
+    tokens.append("[SEP]")  # 102: end token
     segment_ids.append(0)
 
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -143,7 +140,7 @@ def convert_sample(words, max_seq_length):
     while len(input_ids) < max_seq_length:
         input_ids.append(0)
         input_mask.append(0)
-        segment_ids.append(0)
+        segment_ids.append(0)  # TODO: use 0 also for padding?
 
     return input_ids, input_mask, segment_ids
 
@@ -160,6 +157,24 @@ def vectorize_features(samples, max_seq_length):
     return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
 
 
+def create_targets(summary_input_ids, summary_input_masks, summary_segment_ids):  # ahead by one timestep
+    target_input_ids, target_masks, target_segment_ids = [], [], []
+
+    for summary_input_id in summary_input_ids:
+        target_input_id = numpy.append(summary_input_id[1:], 0)
+        target_input_ids.append(target_input_id)
+
+    for summary_input_mask in summary_input_masks:
+        target_mask = numpy.append(summary_input_mask[1:], 0)
+        target_masks.append(target_mask)
+
+    for summary_segment_id in summary_segment_ids:
+        target_segment_id = numpy.append(summary_segment_id[1:], 0)
+        target_segment_ids.append(target_segment_id)
+
+    return target_input_ids, target_masks, target_segment_ids
+
+
 def initialize_vars(sess):
     sess.run(tf.local_variables_initializer())
     sess.run(tf.global_variables_initializer())
@@ -167,7 +182,8 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary):
+# TODO: https://stackoverflow.com/questions/50530100/keras-lstm-multi-output-model-predict-two-features-time-series
+def seq2seq_architecture(latent_size, vocabulary_size):
     enc_in_id = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-ids")  # None
     enc_in_mask = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Masks")
     enc_in_segment = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Segment-ids")
@@ -224,12 +240,14 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     input_ids, input_masks, segment_ids = inputs
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     target_sequence = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
+    target_mask = numpy.array(0).reshape(1, 1)
+    target_segment = numpy.array(0).reshape(1, 1)
 
     prediction = []
     stop_condition = False
 
     while not stop_condition:
-        candidates, state = decoder_model.predict([target_sequence, states_value])
+        candidates, state = decoder_model.predict([target_sequence, target_mask, target_segment, states_value])
 
         predicted_word_index = numpy.argmax(candidates)
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])
@@ -240,6 +258,8 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
 
         states_value = state
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)
+        target_mask = numpy.array(0).reshape(1, 1)
+        target_segment = numpy.array(0).reshape(1, 1)
 
     return prediction[:-1]
 
@@ -249,21 +269,6 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
-"""
-words = tokenizer.tokenize("Pozdravljeni, gospod Rok. Dober dan tudi Vam!")
-idx = tokenizer.convert_tokens_to_ids(words)
-repeat = tokenizer.convert_ids_to_tokens(idx)
-first = tokenizer.convert_ids_to_tokens([idx[0]])
-print(len(words), idx, repeat, first)
-
-special = "[CLS]"
-sidx = tokenizer.convert_tokens_to_ids([special])
-convert = tokenizer.convert_ids_to_tokens(sidx)
-print(sidx, convert)
-
-vectorized = convert_sample(words, 30)
-print(vectorized)
-"""
 
 titles, summaries, articles = read_data()
 article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
@@ -272,19 +277,13 @@ vocabulary_size = len(tokenizer.vocab)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
+target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-target_input_ids, target_masks, target_segment_ids = [], [], []
-# TODO: https://stackoverflow.com/questions/50530100/keras-lstm-multi-output-model-predict-two-features-time-series
-
-for summary_input_id in summary_input_ids:
-    target_input_id = numpy.append(summary_input_id[1:], 0)
-    target_input_ids.append(target_input_id)
-
-latent_size = 32
+latent_size = 64
 batch_size = 1
 epochs = 5
 
-seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size, max_len_article, max_len_summary)
+seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
 seq2seq_model.summary()
 
 initialize_vars(sess)
