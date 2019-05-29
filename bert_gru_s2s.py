@@ -122,14 +122,14 @@ def convert_sample(words, max_seq_length):
     tokens = []
     segment_ids = []
     tokens.append("[CLS]")  # 101: start token
-    segment_ids.append(0)
+    segment_ids.append(1)
 
     for token in words:
         tokens.append(token)
-        segment_ids.append(0)  # TODO: check segments (sentence splitting), first sentence == 0
+        segment_ids.append(1)  # TODO: check segments (sentence splitting), first sentence == 1
 
     tokens.append("[SEP]")  # 102: end token
-    segment_ids.append(0)
+    segment_ids.append(1)
 
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
@@ -140,7 +140,7 @@ def convert_sample(words, max_seq_length):
     while len(input_ids) < max_seq_length:
         input_ids.append(0)
         input_mask.append(0)
-        segment_ids.append(0)  # TODO: use 0 also for padding?
+        segment_ids.append(0)
 
     return input_ids, input_mask, segment_ids
 
@@ -209,7 +209,7 @@ def seq2seq_architecture(latent_size, vocabulary_size):
 
     seq2seq_model = tf.keras.models.Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
                                                   dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(lr=0.001), loss='sparse_categorical_crossentropy',
+    seq2seq_model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy',
                           metrics=['acc'])
 
     return seq2seq_model
@@ -240,8 +240,8 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     input_ids, input_masks, segment_ids = inputs
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     target_sequence = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
-    target_mask = numpy.array(0).reshape(1, 1)
-    target_segment = numpy.array(0).reshape(1, 1)
+    target_mask = numpy.array(1).reshape(1, 1)
+    target_segment = numpy.array(1).reshape(1, 1)
 
     prediction = []
     stop_condition = False
@@ -258,8 +258,8 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
 
         states_value = state
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)
-        target_mask = numpy.array(0).reshape(1, 1)
-        target_segment = numpy.array(0).reshape(1, 1)
+        target_mask = numpy.array(1).reshape(1, 1)
+        target_segment = numpy.array(1).reshape(1, 1)
 
     return prediction[:-1]
 
@@ -279,9 +279,9 @@ article_input_ids, article_input_masks, article_segment_ids = vectorize_features
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-latent_size = 64
+latent_size = 96
 batch_size = 1
-epochs = 5
+epochs = 8
 
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
 seq2seq_model.summary()
