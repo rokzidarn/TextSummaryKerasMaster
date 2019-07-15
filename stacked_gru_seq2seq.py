@@ -11,6 +11,7 @@ from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 from keras import optimizers
 from keras.models import load_model
 from pickle import dump, load
+import rouge
 
 
 def read_data():
@@ -134,7 +135,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
     decoder_gru_layer_1_outputs, h_states = decoder_gru_layer_1(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_layer_1_outputs, initial_state=h_states)
+    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_layer_1_outputs)
 
     decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_final_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -189,6 +190,9 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
 
     return prediction[:-1]
 
+
+def prepare_results(p, r, f):
+    return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
 
 # MAIN
 
@@ -256,13 +260,38 @@ graph_epochs = range(1, epochs + 1)
 # [titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 
+predictions = []
+
 # testing
 for index in range(5):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
+    predictions.append(prediction)
 
     print('-')
     print('Summary:', summaries_clean[index])
     print('Prediction:', prediction)
 
 # evaluation using ROUGE
+aggregator = 'Best'
+evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l', 'rouge-w'],
+                        max_n=4,
+                        limit_length=True,
+                        length_limit=100,
+                        length_limit_type='words',
+                        apply_avg=False,
+                        apply_best=True,
+                        alpha=0.5,  # default F1 score
+                        weight_factor=1.2,
+                        stemming=True)
+
+all_hypothesis = [' '.join(prediction) for prediction in predictions]
+all_references = [' '.join(summary) for summary in summaries_clean]
+
+scores = evaluator.get_scores(all_hypothesis, all_references)
+# https://pypi.org/project/py-rouge/
+
+print()
+print('ROUGE evaluation: ')
+for metric, results in sorted(scores.items(), key=lambda x: x[0]):
+    print('\n', prepare_results(results['p'], results['r'], results['f']))
