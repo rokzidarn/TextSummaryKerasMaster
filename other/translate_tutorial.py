@@ -103,7 +103,7 @@ def decode_sequence(encoder_model, decoder_model, input_sequence, fra_chars, fra
 # task: english -> french translator
 
 # parse file
-file = open('data/translations.txt', encoding='utf-8').read().split('\n')
+file = open('../data/translations.txt', encoding='utf-8').read().split('\n')
 num_samples = 2000
 
 # get data, prepare vocabulary

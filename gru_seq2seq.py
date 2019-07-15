@@ -279,7 +279,6 @@ all_hypothesis = [' '.join(prediction) for prediction in predictions]
 all_references = [' '.join(summary) for summary in summaries_clean]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
-# https://pypi.org/project/py-rouge/
 
 print()
 print('ROUGE evaluation: ')

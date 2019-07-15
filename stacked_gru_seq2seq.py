@@ -117,8 +117,8 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
 
-    encoder_gru_1 = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-1')(encoder_embeddings)
-    encoder_gru_2 = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-2')(encoder_gru_1)
+    encoder_gru_1, _ = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-1')(encoder_embeddings)
+    encoder_gru_2, _ = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-2')(encoder_gru_1)
     _, state_h = GRU(latent_size, return_state=True, name='Final-Encoder-GRU')(encoder_gru_2)
     # returns last state (hidden state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output for the last input time step
@@ -134,8 +134,8 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     final_decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Final-Decoder-GRU')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
-    decoder_gru_layer_1_outputs, h_states = decoder_gru_layer_1(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_layer_1_outputs)
+    decoder_gru_layer_1_outputs, h_states = decoder_gru_layer_1(decoder_embeddings, initial_state=encoder_outputs)  # !
+    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_layer_1_outputs, initial_state=encoder_outputs)  # !
 
     decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_final_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -155,8 +155,8 @@ def inference(model, latent_dim):
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
     gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
 
-    decoder_gru_out, _ = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])
-    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')([decoder_gru_out])
+    decoder_gru_out, h_states = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])  # !
+    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')([decoder_gru_out, gru_inference_state_input])  # !
 
     decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
@@ -289,7 +289,6 @@ all_hypothesis = [' '.join(prediction) for prediction in predictions]
 all_references = [' '.join(summary) for summary in summaries_clean]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
-# https://pypi.org/project/py-rouge/
 
 print()
 print('ROUGE evaluation: ')
