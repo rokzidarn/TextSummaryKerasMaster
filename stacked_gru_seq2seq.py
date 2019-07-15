@@ -12,6 +12,7 @@ from keras import optimizers
 from keras.models import load_model
 from pickle import dump, load
 
+
 def read_data():
     summaries = []
     articles = []
@@ -114,7 +115,10 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+
+    encoder_gru_1 = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-1')(encoder_embeddings)
+    encoder_gru_2 = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-2')(encoder_gru_1)
+    _, state_h = GRU(latent_size, return_state=True, name='Final-Encoder-GRU')(encoder_gru_2)
     # returns last state (hidden state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output for the last input time step
     encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
@@ -124,11 +128,15 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
                                    mask_zero=False)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
-    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+
+    decoder_gru_layer_1 = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU-1')
+    final_decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Final-Decoder-GRU')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
-    decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
+    decoder_gru_layer_1_outputs, h_states = decoder_gru_layer_1(decoder_embeddings, initial_state=encoder_outputs)
+    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_layer_1_outputs, initial_state=h_states)
+
+    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_final_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
@@ -145,7 +153,10 @@ def inference(model, latent_dim):
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
     gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
-    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
+
+    decoder_gru_out, _ = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])
+    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')([decoder_gru_out])
+
     decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
     decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
@@ -220,8 +231,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # serialize data, used for inference
-dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary],
-     open('data/models/serialized_data.pkl', 'wb'))
+# dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary], open('data/models/serialized_data.pkl', 'wb'))
 
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
