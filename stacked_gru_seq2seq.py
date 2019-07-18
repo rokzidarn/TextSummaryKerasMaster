@@ -107,7 +107,7 @@ def plot_acc(history_dict, epochs):
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
-    plt.show()
+    # plt.show()
     fig.savefig('data/models/gru_seq2seq.png')
 
 
@@ -141,7 +141,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy', metrics=['acc'])
+    seq2seq_model.compile(optimizer=optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
 
     return seq2seq_model
 
@@ -238,9 +238,9 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary], open('data/models/serialized_data.pkl', 'wb'))
 
 # model hyper parameters
-latent_size = 96  # number of units (output dimensionality)
-embedding_size = 128  # word vector size
-batch_size = 1
+latent_size = 128  # number of units (output dimensionality)
+embedding_size = 96  # word vector size
+batch_size = 16
 epochs = 8
 
 # training
@@ -253,7 +253,7 @@ history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, 
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
-# plot_acc(history_dict, graph_epochs)
+plot_acc(history_dict, graph_epochs)
 
 # inference
 # model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
@@ -269,8 +269,8 @@ for index in range(5):
     predictions.append(prediction)
 
     print('-')
-    print('Summary:', summaries_clean[index])
-    print('Prediction:', prediction)
+    # print('Summary:', summaries_clean[index])
+    # print('Prediction:', prediction)
 
 # evaluation using ROUGE
 aggregator = 'Best'
