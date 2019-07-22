@@ -178,7 +178,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # model hyper parameters
-latent_size = 128  # number of units (output dimensionality)
+latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 1
 epochs = 8
@@ -192,10 +192,12 @@ encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_state=True)
 # the sequence of the last layer is not returned because we want a single vector that stores everything
 
 e = encoder_embeddings(encoder_inputs)
-e, _, _ = encoder_lstm_1(e)
-e, e_state_h, e_state_c = encoder_lstm_2(e)
+e, e_state_h_1, e_state_c_1 = encoder_lstm_1(e)
+e, e_state_h_2, e_state_c_2 = encoder_lstm_2(e)
 encoder_outputs = e  # the encoded, fix-sized vector which seq2seq is all about
-encoder_states = [e_state_h, e_state_c]
+encoder_states = [e_state_h_2, e_state_c_2]
+
+encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
 
 decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
 decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
@@ -209,19 +211,19 @@ decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True,
 decoder_lstm_2 = LSTM(latent_size, name='Decoder-LSTM-2', return_sequences=True, return_state=True)
 decoder_dense = Dense(vocabulary_size, activation='softmax', name="Final-Output-Dense")
 
-# feed the encoder_states as initial input to both decoding lstm layers
 d = decoder_embeddings(decoder_inputs)
-d, d_state_h, d_state_c = decoder_lstm_1(d, initial_state=encoder_states)
-d, _, _ = decoder_lstm_2(d, initial_state=encoder_states)  # TODO
+d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=encoder_states)
+d, d_state_h_2, d_state_c_2 = decoder_lstm_2(d)
 decoder_outputs = decoder_dense(d)
 
-encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
 seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
 
 seq2seq_model.summary()
 seq2seq_model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
 
 history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1), batch_size=batch_size, epochs=epochs)
+
+exit()
 
 # inference
 

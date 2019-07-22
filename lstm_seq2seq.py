@@ -231,7 +231,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 32
+batch_size = 1
 epochs = 8
 
 # training
