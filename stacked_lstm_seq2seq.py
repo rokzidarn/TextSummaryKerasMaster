@@ -178,7 +178,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # model hyper parameters
-latent_size = 96  # number of units (output dimensionality)
+latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 1
 epochs = 8
@@ -186,12 +186,14 @@ epochs = 8
 # training
 encoder_inputs = Input(shape=(None,), name='Encoder-Input')
 encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding', mask_zero=False)
+norm_encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')
 
 encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_sequences=True, return_state=True)
 encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_state=True)
 # the sequence of the last layer is not returned because we want a single vector that stores everything
 
 e = encoder_embeddings(encoder_inputs)
+e = norm_encoder_embeddings(e)
 e, e_state_h_1, e_state_c_1 = encoder_lstm_1(e)
 e, e_state_h_2, e_state_c_2 = encoder_lstm_2(e)
 encoder_outputs = e  # the encoded, fix-sized vector which seq2seq is all about
@@ -206,14 +208,18 @@ decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
 
 decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
 decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=False)
+norm_decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')
 
 decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True, return_state=True)
 decoder_lstm_2 = LSTM(latent_size, name='Decoder-LSTM-2', return_sequences=True, return_state=True)
+norm_decoder = BatchNormalization(name='Decoder-Batch-Normalization-2')
 decoder_dense = Dense(vocabulary_size, activation='softmax', name="Final-Output-Dense")
 
 d = decoder_embeddings(decoder_inputs)
+d = norm_decoder_embeddings(d)
 d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=encoder_states)
 d, d_state_h_2, d_state_c_2 = decoder_lstm_2(d)
+d = norm_decoder(d)
 decoder_outputs = decoder_dense(d)
 
 seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
@@ -223,13 +229,13 @@ seq2seq_model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy
 
 history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1), batch_size=batch_size, epochs=epochs)
 
-exit()
-
 # inference
 
 i = decoder_embeddings(decoder_inputs)
+i = norm_decoder_embeddings(i)
 i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
 i, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
+i = norm_decoder(i)
 decoder_output = decoder_dense(i)
 decoder_states = [h1, c1, h2, c2]  # every layer keeps its own states, important at predicting
 

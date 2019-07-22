@@ -229,7 +229,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # model hyper parameters
-latent_size = 96  # number of units (output dimensionality)
+latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 1
 epochs = 8
