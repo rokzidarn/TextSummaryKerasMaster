@@ -99,7 +99,7 @@ def one_hot_encode(sequences, vocabulary_size, max_length_summary):
 
 
 def plot_acc(history_dict, epochs):
-    acc = history_dict['acc']
+    acc = history_dict['sparse_categorical_accuracy']
 
     fig = plt.figure()
     plt.plot(epochs, acc, 'r')
@@ -241,7 +241,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 16
-epochs = 8
+epochs = 12
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
@@ -263,7 +263,7 @@ encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 predictions = []
 
 # testing
-for index in range(5):
+for index in range(2):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
@@ -286,7 +286,7 @@ evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l', 'rouge-w'],
                         stemming=True)
 
 all_hypothesis = [' '.join(prediction) for prediction in predictions]
-all_references = [' '.join(summary) for summary in summaries_clean]
+all_references = [' '.join(summary) for summary in summaries_clean[:2]]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
 

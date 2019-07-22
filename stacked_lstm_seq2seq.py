@@ -11,6 +11,7 @@ from keras.layers import Input, LSTM, GRU, Dense, Embedding, TimeDistributed, Ba
 from keras import optimizers
 from keras.utils import to_categorical
 
+
 def read_data():
     summaries = []
     articles = []
@@ -105,7 +106,7 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    # fig.savefig('lstm_seq2seq.png')
+    fig.savefig('lstm_seq2seq.png')
 
 
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
@@ -177,26 +178,24 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # model hyper parameters
-latent_size = 96  # number of units (output dimensionality)
+latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 32
+batch_size = 1
 epochs = 8
 
 # training
 encoder_inputs = Input(shape=(None,), name='Encoder-Input')
-encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                               mask_zero=False)(encoder_inputs)
+encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding', mask_zero=False)
 
 encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_sequences=True, return_state=True)
-encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_sequences=True, return_state=True)
-encoder_lstm_3 = LSTM(latent_size, name='Encoder-LSTM-3', return_sequences=False, return_state=True)
+encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_state=True)
 # the sequence of the last layer is not returned because we want a single vector that stores everything
 
-x, _, _ = encoder_lstm_1(encoder_embeddings)
-x, _, _ = encoder_lstm_2(x)
-x, state_h, state_c = encoder_lstm_3(x)
-encoder_output = x  # the encoded, fix-sized vector which seq2seq is all about
-encoder_states = [state_h, state_c]
+e = encoder_embeddings(encoder_inputs)
+e, _, _ = encoder_lstm_1(e)
+e, e_state_h, e_state_c = encoder_lstm_2(e)
+encoder_outputs = e  # the encoded, fix-sized vector which seq2seq is all about
+encoder_states = [e_state_h, e_state_c]
 
 decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
 decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
@@ -204,38 +203,37 @@ decoder_initial_state_h2 = Input(shape=(latent_size,), name='Decoder-Init-H2')
 decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
 
 decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
-decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                               mask_zero=False)(decoder_inputs)
+decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=False)
 
 decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True, return_state=True)
 decoder_lstm_2 = LSTM(latent_size, name='Decoder-LSTM-2', return_sequences=True, return_state=True)
 decoder_dense = Dense(vocabulary_size, activation='softmax', name="Final-Output-Dense")
 
 # feed the encoder_states as initial input to both decoding lstm layers
-x, _, _ = decoder_lstm_1(decoder_embeddings, initial_state=encoder_states)
-x, _, _ = decoder_lstm_2(x, initial_state=encoder_states)
-decoder_output = decoder_dense(x)
+d = decoder_embeddings(decoder_inputs)
+d, d_state_h, d_state_c = decoder_lstm_1(d, initial_state=encoder_states)
+d, _, _ = decoder_lstm_2(d, initial_state=encoder_states)  # TODO
+decoder_outputs = decoder_dense(d)
 
 encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
-seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_output)
+seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
+
+seq2seq_model.summary()
+seq2seq_model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
+
+history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1), batch_size=batch_size, epochs=epochs)
 
 # inference
-x = decoder_embeddings
-x, h1, c1 = decoder_lstm_1(x, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
-x, h2, c2 = decoder_lstm_2(x, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
-decoder_output = decoder_dense(x)
+
+i = decoder_embeddings(decoder_inputs)
+i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
+i, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
+decoder_output = decoder_dense(i)
 decoder_states = [h1, c1, h2, c2]  # every layer keeps its own states, important at predicting
 
 decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1,
                                                  decoder_initial_state_h2, decoder_initial_state_c2],
                       outputs=[decoder_output] + decoder_states)
-# model outputs h1,c1,h2,c2
-
-seq2seq_model.summary()
-seq2seq_model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=["acc"])
-
-history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
-                            batch_size=batch_size, epochs=epochs)
 
 # testing
 for index in range(5):
