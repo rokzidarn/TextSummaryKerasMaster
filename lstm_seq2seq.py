@@ -3,13 +3,12 @@ import nltk
 import codecs
 import itertools
 import numpy
-from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, LSTM, GRU, Dense, Embedding, TimeDistributed, BatchNormalization
-from keras import optimizers
-from keras.utils import to_categorical
+from keras.layers import Input, LSTM, Dense, Embedding, BatchNormalization
+import rouge
+
 
 def read_data():
     summaries = []
@@ -94,18 +93,16 @@ def one_hot_encode(sequences, vocabulary_size, max_length_summary):
 
 
 def plot_acc(history_dict, epochs):
-    acc = history_dict['acc']
-    val_acc = history_dict['val_acc']
+    acc = history_dict['sparse_categorical_accuracy']
 
     fig = plt.figure()
-    plt.plot(epochs, acc, 'r', label='Training acc')
-    plt.plot(epochs, val_acc, 'g', label='Testing acc')
-    plt.title('Training and testing accuracy')
+    plt.plot(epochs, acc, 'r')
+    plt.title('Training accuracy')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    # fig.savefig('lstm_seq2seq.png')
+    fig.savefig('data/models/lstm_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
@@ -116,6 +113,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     _, state_h, state_c = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
     # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output and cell state for the last input time step
+
     encoder_states = [state_h, state_c]
     encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
@@ -123,12 +121,13 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
                                    mask_zero=False)(decoder_inputs)
-    decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
-    decoder_gru = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
+    decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
+    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
-    decoder_lstm_outputs, _, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_lstm_outputs)
+
+    decoder_lstm_outputs, _, _ = decoder_lstm(decoder_embeddings, initial_state=encoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_lstm_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
@@ -138,20 +137,18 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     return seq2seq_model
 
 
-def inference(model):
+def inference(model, latent_size):
     encoder_model = model.get_layer('Encoder-Model')
 
-    # TODO: does decoder latent_size must equal decoder embedding_size
-    latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # gets embedding size, not latent size
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
-    decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
+    decoder_embeddings = model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
+    inference_state_h_input = Input(shape=(latent_size,), name='hidden_state_input')
+    inference_state_c_input = Input(shape=(latent_size,), name='cell_state_input')
 
-    inference_state_h_input = Input(shape=(latent_dim,), name='hidden_state_input')
-    inference_state_c_input = Input(shape=(latent_dim,), name='cell_state_input')
     lstm_out, lstm_state_h_out, lstm_state_c_out = model.get_layer('Decoder-LSTM')(
         [decoder_embeddings, inference_state_h_input, inference_state_c_input])
-    decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(lstm_out)
+    decoder_outputs = model.get_layer('Decoder-Batch-Normalization-2')(lstm_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
     decoder_model = Model([decoder_inputs, inference_state_h_input, inference_state_c_input],
                           [dense_out, lstm_state_h_out, lstm_state_c_out])
@@ -172,8 +169,6 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         candidates, state_h, state_c = decoder_model.predict([target_sequence, states_value_h, states_value_c])
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
-        # TODO: if <UNK> search in similar location in input sequence
-        # TODO: if predicted is the same as previous, get next candidate
         predicted_word = idx2word[predicted_word_index]
         prediction.append(predicted_word)
 
@@ -186,6 +181,10 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
+
+
+def prepare_results(p, r, f):
+    return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
 
 
 # MAIN
@@ -231,7 +230,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 1
+batch_size = 16
 epochs = 8
 
 # training
@@ -242,14 +241,38 @@ history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_targ
                             batch_size=batch_size, epochs=epochs)
 
 # inference
-encoder_model, decoder_model = inference(seq2seq_model)
+encoder_model, decoder_model = inference(seq2seq_model, latent_size)
+
+predictions = []
 
 # testing
 for index in range(5):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
+    predictions.append(prediction)
 
-    print('-')
-    print('Article:', articles_clean[index])
-    print('Summary:', summaries_clean[index])
-    print('Prediction:', prediction)
+    #print('-')
+    #print('Summary:', summaries_clean[index])
+    #print('Prediction:', prediction)
+
+# evaluation using ROUGE
+aggregator = 'Best'
+evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
+                        max_n=3,
+                        limit_length=True,
+                        length_limit=100,
+                        length_limit_type='words',
+                        apply_avg=False,
+                        apply_best=True,
+                        alpha=0.5,  # default F1 score
+                        weight_factor=1.2,
+                        stemming=True)
+
+all_hypothesis = [' '.join(prediction) for prediction in predictions]
+all_references = [' '.join(summary) for summary in summaries_clean[:5]]
+
+scores = evaluator.get_scores(all_hypothesis, all_references)
+
+print('\n ROUGE evaluation: ')
+for metric, results in sorted(scores.items(), key=lambda x: x[0]):
+    print('\n', prepare_results(results['p'], results['r'], results['f']))

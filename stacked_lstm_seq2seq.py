@@ -3,13 +3,11 @@ import nltk
 import codecs
 import itertools
 import numpy
-from pprint import pprint
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, LSTM, GRU, Dense, Embedding, TimeDistributed, BatchNormalization
-from keras import optimizers
-from keras.utils import to_categorical
+from keras.layers import Input, LSTM, Dense, Embedding, BatchNormalization
+import rouge
 
 
 def read_data():
@@ -95,24 +93,21 @@ def one_hot_encode(sequences, vocabulary_size, max_length_summary):
 
 
 def plot_acc(history_dict, epochs):
-    acc = history_dict['acc']
-    val_acc = history_dict['val_acc']
+    acc = history_dict['sparse_categorical_accuracy']
 
     fig = plt.figure()
-    plt.plot(epochs, acc, 'r', label='Training acc')
-    plt.plot(epochs, val_acc, 'g', label='Testing acc')
-    plt.title('Training and testing accuracy')
+    plt.plot(epochs, acc, 'r')
+    plt.title('Training accuracy')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    fig.savefig('lstm_seq2seq.png')
+    fig.savefig('data/models/stacked_lstm_seq2seq.png')
 
 
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
     # encode the input as state vectors
     initial_state = encoder_model.predict(input_sequence)
-    initial_state = initial_state + initial_state
     # populate the first character of target sequence with the start character
     target_sequence = numpy.array(word2idx['<START>']).reshape(1, 1)
 
@@ -120,10 +115,9 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
 
     while not stop_condition:
-        candidates, h1, c1, h2, c2 = decoder_model.predict([target_sequence] + initial_state)
+        candidates, h1, c1 = decoder_model.predict([target_sequence] + initial_state)
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
-        # TODO: if predicted is the same as previous, get next candidate
         predicted_word = idx2word[predicted_word_index]
         prediction.append(predicted_word)
 
@@ -131,10 +125,14 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        initial_state = [h1, c1, h2, c2]
+        initial_state = [h1, c1]
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
+
+
+def prepare_results(p, r, f):
+    return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
 
 
 # MAIN
@@ -180,8 +178,8 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 1
-epochs = 8
+batch_size = 16
+epochs = 12
 
 # training
 encoder_inputs = Input(shape=(None,), name='Encoder-Input')
@@ -203,8 +201,6 @@ encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
 
 decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
 decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
-decoder_initial_state_h2 = Input(shape=(latent_size,), name='Decoder-Init-H2')
-decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
 
 decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
 decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=False)
@@ -234,21 +230,47 @@ history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, 
 i = decoder_embeddings(decoder_inputs)
 i = norm_decoder_embeddings(i)
 i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
-i, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
+i, h2, c2 = decoder_lstm_2(i)
 i = norm_decoder(i)
 decoder_output = decoder_dense(i)
-decoder_states = [h1, c1, h2, c2]  # every layer keeps its own states, important at predicting
+decoder_states = [h1, c1]  # every layer keeps its own states, important at predicting
 
-decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1,
-                                                 decoder_initial_state_h2, decoder_initial_state_c2],
+decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1],
                       outputs=[decoder_output] + decoder_states)
+
+# https://stackoverflow.com/questions/50915634/multilayer-seq2seq-model-with-lstm-in-keras/54411951#54411951
+# https://stackoverflow.com/questions/52465971/keras-seq2seq-stacked-layers
+
+predictions = []
 
 # testing
 for index in range(5):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
+    predictions.append(prediction)
 
-    print('-')
-    print('Article:', articles_clean[index])
-    print('Summary:', summaries_clean[index])
-    print('Prediction:', prediction)
+    #print('-')
+    #print('Summary:', summaries_clean[index])
+    #print('Prediction:', prediction)
+
+# evaluation using ROUGE
+aggregator = 'Best'
+evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
+                        max_n=3,
+                        limit_length=True,
+                        length_limit=100,
+                        length_limit_type='words',
+                        apply_avg=False,
+                        apply_best=True,
+                        alpha=0.5,  # default F1 score
+                        weight_factor=1.2,
+                        stemming=True)
+
+all_hypothesis = [' '.join(prediction) for prediction in predictions]
+all_references = [' '.join(summary) for summary in summaries_clean[:5]]
+
+scores = evaluator.get_scores(all_hypothesis, all_references)
+
+print('\n ROUGE evaluation: ')
+for metric, results in sorted(scores.items(), key=lambda x: x[0]):
+    print('\n', prepare_results(results['p'], results['r'], results['f']))
