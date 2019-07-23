@@ -6,7 +6,7 @@ import numpy
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
-from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, Dropout, Conv1D, MaxPooling1D, Flatten
+from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 import rouge
 
 
@@ -104,60 +104,49 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
-    fig.savefig('data/models/conv_seq2seq.png')
+    fig.savefig('data/models/gru_seq2seq.png')
 
 
-def seq2seq_architecture(max_length_article, max_length_summary, latent_size, embedding_size, vocabulary_size):
-    encoder_inputs = Input(shape=(max_length_article,), name='Encoder-Input')
+def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
+    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
                                    mask_zero=False)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
+    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+    # returns last state (hidden state), discard encoder_outputs, only keep the states
+    # return state = returns the hidden state output for the last input time step
 
-    encoder_conv = Conv1D(filters=32, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
-    encoder_drop = Dropout(0.25)(encoder_conv)
-    encoder_pool = MaxPooling1D(pool_size=4)(encoder_drop)
-    encoder_flatten = Flatten()(encoder_pool)
-
-    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
+    encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
-    decoder_inputs = Input(shape=(None,), name='Decoder-Input')
+    decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
                                    mask_zero=False)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-
-    decoder_conv = Conv1D(filters=16, kernel_size=2, padding='same', activation='relu',
-                          name='Decoder-Conv1D')(decoder_embeddings)
-    decoder_drop = Dropout(0.25, name='Decoder-Conv1D-Dropout')(decoder_conv)
-    decoder_pool = MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
-
     decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
-    decoder_gru_outputs, _ = decoder_gru(decoder_pool, initial_state=encoder_outputs)
+    # return state needed for inference
+    # return_sequence = returns the hidden state output for each input time step
+
+    decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
     decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
-                          metrics=['sparse_categorical_accuracy'])
+    seq2seq_model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
 
     return seq2seq_model
 
 
-def inference(model):
+def inference(model, latent_dim):
     encoder_model = model.get_layer('Encoder-Model')
 
-    latent_dim = model.get_layer('Decoder-Word-Embedding').output_shape[-1]  # gets embedding size, not latent size
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-
-    decoder_conv = model.get_layer('Decoder-Conv1D')(decoder_embeddings)
-    decoder_drop = model.get_layer('Decoder-Conv1D-Dropout')(decoder_conv)
-    decoder_pool = model.get_layer('Decoder-MaxPool1D')(decoder_drop)
-
     gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
-    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_pool, gru_inference_state_input])
-    decoder_outputs = model.get_layer('Decoder-Batchn-Nrmalization-2')(gru_out)
+
+    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
+    decoder_outputs = model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
     decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
 
@@ -198,7 +187,6 @@ def prepare_results(p, r, f):
 
 # 1D array, each element is string of sentences, separated by newline
 titles, summaries_read, articles_read = read_data()
-num_samples = len(titles)
 
 # 2D array, array of summaries/articles, sub-arrays of words
 summaries_clean = [clean_data(summary) for summary in summaries_read]
@@ -239,27 +227,27 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary], open('data/models/serialized_data.pkl', 'wb'))
 
 # model hyper parameters
-latent_size = 96  # number of units (output dimensionality)
+latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
 batch_size = 16
 epochs = 8
 
 # training
-seq2seq_model = seq2seq_architecture(max_length_article, max_length_summary, latent_size, embedding_size, vocabulary_size)
+seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
+history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 
-# seq2seq_model.save('data/models/conv_seq2seq_model.h5')  # saves model
+# seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
-plot_acc(history_dict, graph_epochs)
+# plot_acc(history_dict, graph_epochs)
 
 # inference
-# model = load_model('data/models/conv_seq2seq_model.h5')  # loads saved model
+# model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
 # [titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
-encoder_model, decoder_model = inference(seq2seq_model)
+encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 
 predictions = []
 
@@ -269,9 +257,9 @@ for index in range(5):
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
 
-    print('-')
-    print('Summary:', summaries_clean[index[:5]])
-    print('Prediction:', prediction)
+    #print('-')
+    #print('Summary:', summaries_clean[index])
+    #print('Prediction:', prediction)
 
 # evaluation using ROUGE
 aggregator = 'Best'
@@ -291,6 +279,18 @@ all_references = [' '.join(summary) for summary in summaries_clean[:5]]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
 
+f = open("data/models/bigru_results.txt", "w")
+f.write("BiGRU \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
+
 print('\n ROUGE evaluation: ')
 for metric, results in sorted(scores.items(), key=lambda x: x[0]):
     print('\n', prepare_results(results['p'], results['r'], results['f']))
+    f.write('\n' + prepare_results(results['p'], results['r'], results['f']))
+
+f.close()
+
+# TODO
+# rnn_seq, h1, c1, h2, c2 = Bidirectional(GRU(64, return_sequences=True, return_state=True))(mask)
+# rnn = Bidirectional(GRU(64, return_sequences=True, return_state=False))(rnn1, initial_state=[h1, c1, h2, c2])
+# att = AttentionWithContext()(rnn)
+# RNN(go_backwards=true)  # use in encoder, reverses the input
