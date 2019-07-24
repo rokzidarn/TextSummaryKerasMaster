@@ -15,7 +15,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/test/'
+    ddir = 'data/small/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -94,14 +94,14 @@ def one_hot_encode(sequences, vocabulary_size, max_length_summary):
     return encoded
 
 
-def plot_acc(history_dict, epochs):
-    acc = history_dict['sparse_categorical_accuracy']
+def plot_training(history_dict, epochs):
+    loss = history_dict['loss']
 
     fig = plt.figure()
-    plt.plot(epochs, acc, 'r')
-    plt.title('Training accuracy')
+    plt.plot(epochs, loss, 'r')
+    plt.title('Training loss')
     plt.xlabel('Epochs')
-    plt.ylabel('Accuracy')
+    plt.ylabel('Loss')
     plt.legend()
     # plt.show()
     fig.savefig('data/models/bigru_seq2seq.png')
@@ -241,7 +241,7 @@ history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, 
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
-plot_acc(history_dict, graph_epochs)
+plot_training(history_dict, graph_epochs)
 
 # inference
 # model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
@@ -251,14 +251,14 @@ encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 predictions = []
 
 # testing
-for index in range(5):
+for index in range(25):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
 
-    print('-')
-    print('Summary:', summaries_clean[index])
-    print('Prediction:', prediction)
+    #print('-')
+    #print('Summary:', summaries_clean[index])
+    #print('Prediction:', prediction)
 
 # evaluation using ROUGE
 aggregator = 'Best'
@@ -274,7 +274,7 @@ evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
                         stemming=True)
 
 all_hypothesis = [' '.join(prediction) for prediction in predictions]
-all_references = [' '.join(summary) for summary in summaries_clean[:5]]
+all_references = [' '.join(summary) for summary in summaries_clean[:25]]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
 
