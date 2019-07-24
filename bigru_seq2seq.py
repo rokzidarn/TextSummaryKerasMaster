@@ -103,8 +103,8 @@ def plot_acc(history_dict, epochs):
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
-    plt.show()
-    fig.savefig('data/models/gru_seq2seq.png')
+    # plt.show()
+    fig.savefig('data/models/bigru_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
@@ -229,7 +229,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
+batch_size = 1
 epochs = 8
 
 # training
@@ -242,7 +242,7 @@ history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, 
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
-# plot_acc(history_dict, graph_epochs)
+plot_acc(history_dict, graph_epochs)
 
 # inference
 # model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
@@ -257,9 +257,9 @@ for index in range(5):
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
 
-    #print('-')
-    #print('Summary:', summaries_clean[index])
-    #print('Prediction:', prediction)
+    print('-')
+    print('Summary:', summaries_clean[index])
+    print('Prediction:', prediction)
 
 # evaluation using ROUGE
 aggregator = 'Best'

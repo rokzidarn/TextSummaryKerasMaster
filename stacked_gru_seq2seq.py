@@ -131,8 +131,8 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
 
-    decoder_gru_1_outputs, h_states = decoder_gru_1(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_1_outputs, initial_state=encoder_outputs)
+    decoder_gru_1_outputs, h_state = decoder_gru_1(decoder_embeddings, initial_state=encoder_outputs)
+    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_1_outputs)  # !
 
     decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_final_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -152,7 +152,7 @@ def inference(model, latent_dim):
     gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
 
     decoder_gru_out, h_states = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])
-    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')([decoder_gru_out, gru_inference_state_input])
+    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')(decoder_gru_out)  # !
 
     decoder_outputs = model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
@@ -237,7 +237,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
+batch_size = 4
 epochs = 8
 
 # training
@@ -265,9 +265,9 @@ for index in range(5):
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
 
-    #print('-')
-    #print('Summary:', summaries_clean[index])
-    #print('Prediction:', prediction)
+    print('-')
+    print('Summary:', summaries_clean[index])
+    print('Prediction:', prediction)
 
 # evaluation using ROUGE
 aggregator = 'Best'
@@ -287,6 +287,10 @@ all_references = [' '.join(summary) for summary in summaries_clean[:5]]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
 
+f = open("data/models/stacked_gru_results.txt", "w")
+f.write("Stacked GRU \n layers: 2 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
+
 print('\n ROUGE evaluation: ')
 for metric, results in sorted(scores.items(), key=lambda x: x[0]):
     print('\n', prepare_results(results['p'], results['r'], results['f']))
+    f.write('\n' + prepare_results(results['p'], results['r'], results['f']))
