@@ -108,14 +108,16 @@ def plot_training(history_dict, epochs):
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
     # encode the input as state vectors
     initial_state = encoder_model.predict(input_sequence)
-    # populate the first character of target sequence with the start character
+    # simply repeat the encoder states since  both decoding layers were trained on the encoded-vector as initialization
+    initial_state = initial_state + initial_state
     target_sequence = numpy.array(word2idx['<START>']).reshape(1, 1)
+    # populate the first character of target sequence with the start character
 
     prediction = []
     stop_condition = False
 
     while not stop_condition:
-        candidates, h1, c1 = decoder_model.predict([target_sequence] + initial_state)
+        candidates, h1, c1, h2, c2 = decoder_model.predict([target_sequence] + initial_state)
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
         predicted_word = idx2word[predicted_word_index]
@@ -125,7 +127,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        initial_state = [h1, c1]
+        initial_state = [h1, c1, h2, c2]
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
@@ -151,7 +153,7 @@ print('Max lengths of summary/article in dataset: ', max_length_summary, '/', ma
 
 all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
 fdist, word2idx, idx2word = build_vocabulary(all_tokens)
-vocabulary_size = len(fdist.items())  # without <PAD>, <START>, <END>, <UNK> tokens
+vocabulary_size = len(word2idx.items())  # with <PAD>, <START>, <END>, <UNK> tokens
 
 print('Vocabulary size (number of all possible words): ', vocabulary_size)
 print('Most common words: ', fdist.most_common(10))
@@ -201,6 +203,8 @@ encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
 
 decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
 decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
+decoder_initial_state_h2 = Input(shape=(latent_size,), name='Decoder-Init-H2')
+decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
 
 decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
 decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=True)
@@ -214,7 +218,7 @@ decoder_dense = Dense(vocabulary_size, activation='softmax', name="Final-Output-
 d = decoder_embeddings(decoder_inputs)
 d = norm_decoder_embeddings(d)
 d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=encoder_states)
-d, d_state_h_2, d_state_c_2 = decoder_lstm_2(d)
+d, d_state_h_2, d_state_c_2 = decoder_lstm_2(d, initial_state=encoder_states)
 d = norm_decoder(d)
 decoder_outputs = decoder_dense(d)
 
@@ -234,12 +238,13 @@ plot_training(history_dict, graph_epochs)
 i = decoder_embeddings(decoder_inputs)
 i = norm_decoder_embeddings(i)
 i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
-i, h2, c2 = decoder_lstm_2(i)
+i, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
 i = norm_decoder(i)
 decoder_output = decoder_dense(i)
-decoder_states = [h1, c1]  # every layer keeps its own states, important at predicting
+decoder_states = [h1, c1, h2, c2]  # every layer keeps its own states, important at predicting
 
-decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1],
+decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1,
+                                                 decoder_initial_state_h2, decoder_initial_state_c2],
                       outputs=[decoder_output] + decoder_states)
 
 # https://stackoverflow.com/questions/50915634/multilayer-seq2seq-model-with-lstm-in-keras/54411951#54411951

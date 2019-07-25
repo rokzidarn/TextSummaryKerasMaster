@@ -115,8 +115,6 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
 
     encoder_gru_1, _ = GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU-1')(encoder_embeddings)
     _, state_h = GRU(latent_size, return_state=True, name='Final-Encoder-GRU')(encoder_gru_1)
-    # returns last state (hidden state), discard encoder_outputs, only keep the states
-    # return state = returns the hidden state output for the last input time step
 
     encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
@@ -128,11 +126,9 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
 
     decoder_gru_1 = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU-1')
     final_decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Final-Decoder-GRU')
-    # return state needed for inference
-    # return_sequence = returns the hidden state output for each input time step
 
     decoder_gru_1_outputs, h_state = decoder_gru_1(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_1_outputs)  # !
+    decoder_gru_final_outputs, _ = final_decoder_gru(decoder_gru_1_outputs, initial_state=encoder_outputs)
 
     decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_final_outputs)
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -149,14 +145,14 @@ def inference(model, latent_dim):
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-    gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
+    gru_inference_state_input = Input(shape=(latent_dim,), name='Hidden-State-Input-1')
 
-    decoder_gru_out, h_states = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])
-    gru_out, gru_state_out = model.get_layer('Final-Decoder-GRU')(decoder_gru_out)  # !
+    decoder_gru_out, _ = model.get_layer('Decoder-GRU-1')([decoder_embeddings, gru_inference_state_input])
+    gru_out, h_state = model.get_layer('Final-Decoder-GRU')([decoder_gru_out, gru_inference_state_input])
 
     decoder_outputs = model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, h_state])
 
     return encoder_model, decoder_model
 
@@ -164,6 +160,7 @@ def inference(model, latent_dim):
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
     # encode the input as state vectors
     states_value = encoder_model.predict(input_sequence)
+    states_value = states_value + states_value
     # populate the first character of target sequence with the start character
     target_sequence = numpy.array(word2idx['<START>']).reshape(1, 1)
 
@@ -171,7 +168,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
 
     while not stop_condition:
-        candidates, state = decoder_model.predict([target_sequence, states_value])
+        candidates, h = decoder_model.predict([target_sequence, states_value])
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
         predicted_word = idx2word[predicted_word_index]
@@ -181,7 +178,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        states_value = state
+        states_value = h
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
@@ -237,7 +234,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 3
+batch_size = 16
 epochs = 12
 
 # training
