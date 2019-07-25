@@ -108,7 +108,7 @@ def plot_training(history_dict, epochs):
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     encoder_inputs = Input(shape=(None,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                   mask_zero=False)(encoder_inputs)
+                                   mask_zero=True)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     _, state_hf, state_cf, state_hb, state_cb = Bidirectional(LSTM(int(latent_size/2), return_state=True,
                                                                    name='Encoder-LSTM'))(encoder_embeddings)
@@ -121,7 +121,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
 
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                   mask_zero=False)(decoder_inputs)
+                                   mask_zero=True)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
     decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     # return state needed for inference
@@ -229,10 +229,10 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
 # model hyper parameters
-latent_size = 128  # number of units (output dimensionality)
+latent_size = 256  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
-epochs = 8
+batch_size = 3
+epochs = 12
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)

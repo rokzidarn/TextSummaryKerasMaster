@@ -178,12 +178,12 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
-epochs = 8
+batch_size = 3
+epochs = 12
 
 # training
 encoder_inputs = Input(shape=(None,), name='Encoder-Input')
-encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding', mask_zero=False)
+encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding', mask_zero=True)
 norm_encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')
 
 encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_sequences=True, return_state=True)
@@ -203,7 +203,7 @@ decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
 decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
 
 decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
-decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=False)
+decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding', mask_zero=True)
 norm_decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')
 
 decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True, return_state=True)

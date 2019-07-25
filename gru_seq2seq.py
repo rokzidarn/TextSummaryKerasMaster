@@ -3,6 +3,7 @@ import nltk
 import codecs
 import itertools
 import numpy
+import random
 import matplotlib.pyplot as plt
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Model
@@ -15,7 +16,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/small/'
+    ddir = 'data/big/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -110,7 +111,7 @@ def plot_training(history_dict, epochs):
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
     encoder_inputs = Input(shape=(None,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                   mask_zero=False)(encoder_inputs)
+                                   mask_zero=True)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     # returns last state (hidden state), discard encoder_outputs, only keep the states
@@ -121,7 +122,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
 
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                   mask_zero=False)(decoder_inputs)
+                                   mask_zero=True)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
     decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     # return state needed for inference
@@ -143,7 +144,7 @@ def inference(model, latent_dim):
     decoder_inputs = model.get_layer('Decoder-Input').input
     decoder_embeddings = model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-    gru_inference_state_input = Input(shape=(latent_dim,), name='hidden_state_input')
+    gru_inference_state_input = Input(shape=(latent_dim,), name='Hidden-State-Input')
 
     gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
     decoder_outputs = model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
@@ -187,18 +188,25 @@ def prepare_results(p, r, f):
 
 # 1D array, each element is string of sentences, separated by newline
 titles, summaries_read, articles_read = read_data()
+dataset_size = len(titles)
+train_size = int(dataset_size*0.9)
+test_size = dataset_size - train_size
 
 # 2D array, array of summaries/articles, sub-arrays of words
 summaries_clean = [clean_data(summary) for summary in summaries_read]
 articles_clean = [clean_data(article) for article in articles_read]
 
-max_length_summary = len(max(summaries_clean, key=len)) + 2  # with <START> and <END> tokens added
-max_length_article = len(max(articles_clean, key=len)) + 2
+data = list(zip(summaries_clean, articles_clean))
+random.shuffle(data)
+summaries_data, articles_data = zip(*data)
+
+max_length_summary = len(max(summaries_data, key=len)) + 2  # with <START> and <END> tokens added
+max_length_article = len(max(articles_data, key=len)) + 2
 
 print('Dataset size (number of summary-article pairs): ', len(summaries_read))
 print('Max lengths of summary/article in dataset: ', max_length_summary, '/', max_length_article)
 
-all_tokens = list(itertools.chain(*summaries_clean)) + list(itertools.chain(*articles_clean))
+all_tokens = list(itertools.chain(*summaries_data)) + list(itertools.chain(*articles_data))
 fdist, word2idx, idx2word = build_vocabulary(all_tokens)
 vocabulary_size = len(word2idx.items())  # with <PAD>, <START>, <END>, <UNK> tokens
 
@@ -208,10 +216,10 @@ print('Vocabulary (word -> index): ', {k: word2idx[k] for k in list(word2idx)[:1
 print('Inverted vocabulary (index -> word): ', {k: idx2word[k] for k in list(idx2word)[:10]})
 
 # 2D array, array of summaries/articles, sub-arrays of indexes (int)
-summaries_vectors = pre_process(summaries_clean, word2idx)
-articles_vectors = pre_process(articles_clean, word2idx)
+summaries_vectors = pre_process(summaries_data, word2idx)
+articles_vectors = pre_process(articles_data, word2idx)
 
-tmp_vectors = pre_process(summaries_clean, word2idx)  # same as summaries_vectors, but with delay
+tmp_vectors = pre_process(summaries_data, word2idx)  # same as summaries_vectors, but with delay
 target_vectors = []  # ahead by one timestep, without start token
 for tmp in tmp_vectors:
     tmp.append(word2idx['<PAD>'])  # added <PAD>, so the dimensions match
@@ -223,20 +231,17 @@ X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='
 Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 # Y_encoded_target = one_hot_encode(Y_target, vocabulary_size, max_length_summary)
 
-# serialize data, used for inference
-# dump([titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary], open('data/models/serialized_data.pkl', 'wb'))
-
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
-epochs = 8
+batch_size = 8
+epochs = 30
 
 # training
 seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
-                            batch_size=batch_size, epochs=epochs)
+history = seq2seq_model.fit([X_article[:train_size], X_summary[:train_size]],
+                            numpy.expand_dims(Y_target[:train_size], -1), batch_size=batch_size, epochs=epochs)
 
 # seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
 
@@ -246,20 +251,19 @@ plot_training(history_dict, graph_epochs)
 
 # inference
 # model = load_model('data/models/gru_seq2seq_model.h5')  # loads saved model
-# [titles, X_article, summaries_clean, word2idx, idx2word, max_length_summary] = load(open('data/models/serialized_data.pkl', 'rb'))  # loads serialized data
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 
 predictions = []
 
 # testing
-for index in range(25):
+for index in range(train_size+1, dataset_size+1):
     input_sequence = X_article[index:index+1]
     prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_length_summary)
     predictions.append(prediction)
 
     #print('-')
-    #print('Summary:', summaries_clean[index])
-    #print('Prediction:', prediction)
+    #print('Summary:', summaries_data[index])
+    #print('Prediction:', prediction[:200])
 
 # evaluation using ROUGE
 aggregator = 'Best'
@@ -275,7 +279,7 @@ evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
                         stemming=True)
 
 all_hypothesis = [' '.join(prediction) for prediction in predictions]
-all_references = [' '.join(summary) for summary in summaries_clean[:25]]
+all_references = [' '.join(summary) for summary in summaries_data[train_size+1:dataset_size+1]]
 
 scores = evaluator.get_scores(all_hypothesis, all_references)
 

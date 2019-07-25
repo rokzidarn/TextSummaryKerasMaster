@@ -110,7 +110,7 @@ def plot_acc(history_dict, epochs):
 def seq2seq_architecture(max_length_article, max_length_summary, latent_size, embedding_size, vocabulary_size):
     encoder_inputs = Input(shape=(max_length_article,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                   mask_zero=False)(encoder_inputs)
+                                   mask_zero=True)(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
 
     encoder_conv = Conv1D(filters=32, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
@@ -123,7 +123,7 @@ def seq2seq_architecture(max_length_article, max_length_summary, latent_size, em
 
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')
     decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                   mask_zero=False)(decoder_inputs)
+                                   mask_zero=True)(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
 
     decoder_conv = Conv1D(filters=16, kernel_size=2, padding='same', activation='relu',
@@ -241,7 +241,7 @@ Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='pos
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
 embedding_size = 96  # word vector size
-batch_size = 16
+batch_size = 3
 epochs = 8
 
 # training
