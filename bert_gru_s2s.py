@@ -52,17 +52,17 @@ class BertLayer(tf.layers.Layer):
         return input_shape[0], self.output_size
 
 
-def plot_acc(history_dict, epochs):
-    acc = history_dict['acc']
+def plot_training(history_dict, epochs):
+    loss = history_dict['loss']
 
     fig = plt.figure()
-    plt.plot(epochs, acc, 'r')
-    plt.title('Training accuracy')
+    plt.plot(epochs, loss, 'r')
+    plt.title('Training loss')
     plt.xlabel('Epochs')
-    plt.ylabel('Accuracy')
+    plt.ylabel('Loss')
     plt.legend()
-    plt.show()
-    fig.savefig('data/models/bert_gru_s2q.png')
+    # plt.show()
+    fig.savefig('data/models/bert.png')
 
 
 def read_data():
@@ -70,7 +70,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/test/'
+    ddir = 'data/bert/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -104,7 +104,7 @@ def create_tokenizer_from_hub_module(sess):
     return FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 
-def tokenize_samples(tokenizer, samples):
+def tokenize_samples(tokenizer, samples):  # TODO
     words = []
 
     for sample in samples:
@@ -112,47 +112,43 @@ def tokenize_samples(tokenizer, samples):
 
     max_seq_length = len(max(words, key=len))
 
-    return words, max_seq_length
+    return words, max_seq_length + 10  # TODO: count number of [SEP] tokens needed
 
 
-def convert_sample(words, max_seq_length):
-    if len(words) > max_seq_length - 2:
-        words = words[0:(max_seq_length - 2)]
-
+def convert_sample(tokenizer, words, max_seq_length):
     it = 1
     tokens = []
     segment_ids = []
-    tokens.append("[CLS]")  # 101: start token
+    tokens.append("[CLS]")  # 101: sentence start token
     segment_ids.append(it)
 
-    for token in words:  # TODO: sentence splitting, segments (use [SEP] token)
+    for token in words:
         tokens.append(token)
         segment_ids.append(it)
         if token == "." or token == "!" or token == "?":  # check segments (sentence splitting), first sentence == 1
+            tokens.append("[SEP]")  # 102: sentence end token
+            segment_ids.append(it)
             it += 1
-
-    tokens.append("[SEP]")  # 102: end token
-    segment_ids.append(it-1)
 
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
     # the mask has 1 for real tokens and 0 for padding tokens, only real tokens are attended to
-    input_mask = [1] * len(input_ids)
+    input_masks = [1] * len(input_ids)
 
     # zero-pad up to the sequence length
     while len(input_ids) < max_seq_length:
         input_ids.append(0)
-        input_mask.append(0)
+        input_masks.append(0)
         segment_ids.append(0)
 
-    return input_ids, input_mask, segment_ids
+    return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
 
 
-def vectorize_features(samples, max_seq_length):
+def vectorize_features(tokenizer, samples, max_seq_length):
     input_ids, input_masks, segment_ids = [], [], []
 
     for sample in samples:
-        input_id, input_mask, segment_id = convert_sample(sample, max_seq_length)
+        input_id, input_mask, segment_id = convert_sample(tokenizer, sample, max_seq_length)
         input_ids.append(input_id)
         input_masks.append(input_mask)
         segment_ids.append(segment_id)
@@ -175,7 +171,7 @@ def create_targets(summary_input_ids, summary_input_masks, summary_segment_ids):
         target_segment_id = numpy.append(summary_segment_id[1:], 0)
         target_segment_ids.append(target_segment_id)
 
-    return target_input_ids, target_masks, target_segment_ids
+    return np.array(target_input_ids), np.array(target_masks), np.array(target_segment_ids)
 
 
 def initialize_vars(sess):
@@ -185,7 +181,6 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-# TODO: https://stackoverflow.com/questions/50530100/keras-lstm-multi-output-model-predict-two-features-time-series
 def seq2seq_architecture(latent_size, vocabulary_size):
     enc_in_id = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-ids")  # None
     enc_in_mask = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Masks")
@@ -212,8 +207,8 @@ def seq2seq_architecture(latent_size, vocabulary_size):
 
     seq2seq_model = tf.keras.models.Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
                                                   dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.Nadam(lr=0.001), loss='sparse_categorical_crossentropy',
-                          metrics=['acc'])
+    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(), loss='sparse_categorical_crossentropy',
+                          metrics=['sparse_categorical_accuracy'])
 
     return seq2seq_model
 
@@ -229,7 +224,7 @@ def inference(model, latent_dim):
     decoder_embeddings = model.get_layer('Decoder-Bert-Layer')(bert_decoder_inputs)
 
     decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
-    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='hidden_state_input')
+    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='Hidden-State-Input')
     gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
     decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
@@ -283,13 +278,13 @@ article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
 summary_tokens, max_len_summary = tokenize_samples(tokenizer, summaries)
 vocabulary_size = len(tokenizer.vocab)
 
-article_input_ids, article_input_masks, article_segment_ids = vectorize_features(article_tokens, max_len_article)
-summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(summary_tokens, max_len_summary)
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_len_article)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_len_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
 latent_size = 128
 batch_size = 1
-epochs = 8
+epochs = 4
 
 seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
 seq2seq_model.summary()
@@ -302,7 +297,7 @@ seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
 
 encoder_model, decoder_model = inference(seq2seq_model, latent_size)
 
-for i in range(5):
+for i in range(3):
     inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
     prediction = predict_sequence(encoder_model, decoder_model, inputs, max_len_summary, tokenizer)
 
@@ -310,18 +305,3 @@ for i in range(5):
     print('Summary:', summary_tokens[i])
     print('Prediction:', prediction)
 
-"""
-words = tokenizer.tokenize("Pozdravljeni, gospod Rok. Dober dan tudi Vam!")
-idx = tokenizer.convert_tokens_to_ids(words)
-repeat = tokenizer.convert_ids_to_tokens(idx)
-first = tokenizer.convert_ids_to_tokens([idx[0]])
-print(len(words), idx, repeat, first)
-
-special = "[CLS]"
-sidx = tokenizer.convert_tokens_to_ids([special])
-convert = tokenizer.convert_ids_to_tokens(sidx)
-print(sidx, convert)
-
-vectorized = convert_sample(words, 30)
-print(vectorized)
-"""
