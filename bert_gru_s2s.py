@@ -11,7 +11,7 @@ from bert.tokenization import FullTokenizer
 class BertLayer(tf.layers.Layer):
     def __init__(self, n_fine_tune_layers=3, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
-        self.trainable = True
+        self.trainable = True  # TODO
         self.output_size = 768
         super(BertLayer, self).__init__(**kwargs)
 
@@ -112,7 +112,7 @@ def tokenize_samples(tokenizer, samples):  # TODO
 
     max_seq_length = len(max(words, key=len))
 
-    return words, max_seq_length + 10  # TODO: count number of [SEP] tokens needed
+    return words, max_seq_length + 6  # TODO: count number of [SEP] tokens needed
 
 
 def convert_sample(tokenizer, words, max_seq_length):
@@ -239,7 +239,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     it = 1
 
-    target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
+    target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)  # TODO
     target_mask = numpy.array(1).reshape(1, 1)
     target_segment = numpy.array(it).reshape(1, 1)
 
@@ -249,7 +249,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     while not stop_condition:
         candidates, state = decoder_model.predict([target_input, target_mask, target_segment, states_value])
 
-        predicted_word_index = numpy.argmax(candidates)
+        predicted_word_index = numpy.argmax(candidates[0][0])
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])
         prediction.append(predicted_word)
 
@@ -272,17 +272,17 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
 sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
+vocabulary_size = len(tokenizer.vocab)
 
 titles, summaries, articles = read_data()
 article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
 summary_tokens, max_len_summary = tokenize_samples(tokenizer, summaries)
-vocabulary_size = len(tokenizer.vocab)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_len_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_len_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-latent_size = 128
+latent_size = 768
 batch_size = 1
 epochs = 4
 
@@ -304,4 +304,3 @@ for i in range(3):
     print('-')
     print('Summary:', summary_tokens[i])
     print('Prediction:', prediction)
-
