@@ -9,9 +9,10 @@ from bert.tokenization import FullTokenizer
 
 
 class BertLayer(tf.layers.Layer):
-    def __init__(self, n_fine_tune_layers=3, **kwargs):
+    def __init__(self, n_fine_tune_layers=0, **kwargs):
+        # TODO: 3 = low loss+high acc (less trainable params), 0 = high loss+low acc (more trainable params)
         self.n_fine_tune_layers = n_fine_tune_layers
-        self.trainable = True  # TODO
+        self.trainable = True
         self.output_size = 768
         super(BertLayer, self).__init__(**kwargs)
 
@@ -239,7 +240,8 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     it = 1
 
-    target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)  # TODO
+    # target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
+    target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])[0]).reshape(1, 1)
     target_mask = numpy.array(1).reshape(1, 1)
     target_segment = numpy.array(it).reshape(1, 1)
 
@@ -249,8 +251,9 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     while not stop_condition:
         candidates, state = decoder_model.predict([target_input, target_mask, target_segment, states_value])
 
-        predicted_word_index = numpy.argmax(candidates[0][0])
-        predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])
+        predicted_word_index = numpy.argmax(candidates)
+        # predicted_word_index = numpy.argsort(candidates)[-1]  # same as argmax
+        predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
         if (predicted_word == "[SEP]") or (len(prediction) > max_len):
