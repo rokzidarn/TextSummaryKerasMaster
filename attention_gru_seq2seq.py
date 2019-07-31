@@ -107,26 +107,26 @@ def plot_training(history_dict, epochs):
     fig.savefig('data/models/gru_seq2seq.png')
 
 
-def seq2seq_architecture(latent_size, embedding_size, vocabulary_size):
-    encoder_inputs = tf.keras.layers.Input(shape=(None,), name='Encoder-Input')
+def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, maxx_len_article, max_len_summary):
+    encoder_inputs = tf.keras.layers.Input(shape=(maxx_len_article,), name='Encoder-Input')
     encoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                   mask_zero=True)(encoder_inputs)
+                                   mask_zero=False)(encoder_inputs)
     encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
     encoder_outputs, state_h = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Encoder-GRU')(encoder_embeddings)
     encoder_model = tf.keras.models.Model(inputs=encoder_inputs, outputs=[encoder_outputs, state_h], name='Encoder-Model')
 
-    decoder_inputs = tf.keras.layers.Input(shape=(None,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
+    decoder_inputs = tf.keras.layers.Input(shape=(max_len_summary,), name='Decoder-Input')  # set up decoder, using encoder_states as initial state
     decoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                   mask_zero=True)(decoder_inputs)
+                                   mask_zero=False)(decoder_inputs)
     decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
     decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=state_h)
-    decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
 
-    attn_out, attn_states = AttentionLayer(name='Attention')([encoder_outputs, decoder_outputs])
-    decoder_concat_input = tf.keras.layers.Concatenate(axis=-1, name='Concat')([decoder_outputs, attn_out])
+    attn_out, attn_states = AttentionLayer(name='Attention')([encoder_outputs, decoder_gru_outputs])
+    decoder_concat_input = tf.keras.layers.Concatenate(axis=-1, name='Concat')([decoder_gru_outputs, attn_out])
 
-    decoder_dense = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense'))
+    decoder_dense = tf.keras.layers.TimeDistributed(
+        tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense'), name='Time-Distributed')
     decoder_outputs = decoder_dense(decoder_concat_input)
 
     seq2seq_model = tf.keras.models.Model([encoder_inputs, decoder_inputs], decoder_outputs)
@@ -235,7 +235,7 @@ batch_size = 8
 epochs = 12
 
 # training
-seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size)
+seq2seq_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_length_article, max_length_summary)
 seq2seq_model.summary()
 
 # es = EarlyStopping(monitor='val_loss', mode='min', verbose=1)  # model will stop training once the validation loss increases
@@ -243,8 +243,6 @@ history = seq2seq_model.fit([X_article, X_summary],
                             numpy.expand_dims(Y_target, -1), batch_size=batch_size, epochs=epochs)
 
 # seq2seq_model.save('data/models/gru_seq2seq_model.h5')  # saves model
-
-exit()
 
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
