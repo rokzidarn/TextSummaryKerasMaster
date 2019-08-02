@@ -1,10 +1,7 @@
 import numpy
 from keras.models import Model
 from keras.layers import Input
-from keras.models import load_model
-from pickle import load
-import rouge
-import codecs
+
 
 def inference(model):
     encoder_model = model.get_layer('Encoder-Model')
@@ -46,3 +43,18 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # update target sequence, previous character
 
     return prediction[:-1]
+
+
+"""
+In inference mode, when we want to decode unknown input sequences, we:
+    - Encode the input sequence into state vectors
+    - Start with a target sequence of size 1
+        (just the start-of-sequence character)
+    - Feed the state vectors and 1-char target sequence
+        to the decoder to produce predictions for the next character
+    - Sample the next character using these predictions
+        (we simply use argmax).
+    - Append the sampled character to the target sequence
+    - Repeat until we generate the end-of-sequence character or we
+        hit the character limit.
+"""

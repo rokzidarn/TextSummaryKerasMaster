@@ -6,6 +6,7 @@ import pprint
 from pickle import dump, load
 from keras.utils.vis_utils import plot_model
 
+
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
     val_acc = history_dict['val_acc']
@@ -17,6 +18,7 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
+
 
 def parse_file(file, num_samples):
     eng_sentences = []
@@ -45,6 +47,7 @@ def parse_file(file, num_samples):
 
     return eng_sentences, eng_chars, fra_sentences, fra_chars
 
+
 def create_vocabulary(chars):
     char2idx = {}  # vocabulary, all possible characters, maps character -> index
     idx2char = {}  # reverse vocabulary, for decoding
@@ -54,6 +57,7 @@ def create_vocabulary(chars):
         idx2char[k] = v
 
     return char2idx, idx2char
+
 
 def vectorize(num, eng_sentences, input_sequences, eng2idx, fra_sentences, output_sequences, fra2idx, target_data):
     # sentence vectorization: char -> one-hot
@@ -67,6 +71,7 @@ def vectorize(num, eng_sentences, input_sequences, eng2idx, fra_sentences, outpu
                 target_data[i, k - 1, fra2idx[char]] = 1
 
     return input_sequences, output_sequences, target_data
+
 
 def decode_sequence(encoder_model, decoder_model, input_sequence, fra_chars, fra2idx, idx2fra, max_len_fra):
     # encode the input as state vectors
@@ -176,20 +181,6 @@ history = model.fit(x=[input_sequences, output_sequences], y=target_data,
 history_dict = history.history
 graph_epochs = range(1, epochs + 1)
 plot_acc(history_dict, graph_epochs)
-
-"""
-In inference mode, when we want to decode unknown input sequences, we:
-    - Encode the input sequence into state vectors
-    - Start with a target sequence of size 1
-        (just the start-of-sequence character)
-    - Feed the state vectors and 1-char target sequence
-        to the decoder to produce predictions for the next character
-    - Sample the next character using these predictions
-        (we simply use argmax).
-    - Append the sampled character to the target sequence
-    - Repeat until we generate the end-of-sequence character or we
-        hit the character limit.
-"""
 
 encoder_model = Model(encoder_input, encoder_states)
 

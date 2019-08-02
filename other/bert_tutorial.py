@@ -138,7 +138,7 @@ class PaddingInputExample(object):
 
 
 class InputExample(object):
-    """A single training/test example for simple sequence classification."""
+    """A single training/bert example for simple sequence classification."""
 
     def __init__(self, guid, text_a, text_b=None, label=None):
         """Constructs a InputExample.
@@ -149,7 +149,7 @@ class InputExample(object):
       text_b: (Optional) string. The untokenized text of the second sequence.
         Only must be specified for sequence pair tasks.
       label: (Optional) string. The label of the example. This should be
-        specified for train and dev examples, but not for test examples.
+        specified for train and dev examples, but not for bert examples.
     """
         self.guid = guid
         self.text_a = text_a

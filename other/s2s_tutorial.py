@@ -5,8 +5,10 @@ from keras.models import Model
 from keras.layers import Input, LSTM, Dense
 import matplotlib.pyplot as plt
 
+
 def generate_sequence(length, n_unique):
     return [randint(1, n_unique-1) for _ in range(length)]
+
 
 def generate_dataset(input_sample_size, output_sample_size, sample_token_size, n_samples):
     X1, X2, y = list(), list(), list()
@@ -33,6 +35,7 @@ def generate_dataset(input_sample_size, output_sample_size, sample_token_size, n
     y = np.squeeze(np.array(y), axis=1)
 
     return X1, X2, y
+
 
 def define_models(n_input, n_output, latent_units):
     encoder_inputs = Input(shape=(None, n_input))
@@ -61,6 +64,7 @@ def define_models(n_input, n_output, latent_units):
 
     return model, encoder_model, decoder_model
 
+
 def predict_sequence(inf_encoder_model, inf_decoder_model, input_sequence, output_sample_size, sample_token_size):
     state = inf_encoder_model.predict(input_sequence)  # get input through encoder
 
@@ -79,6 +83,7 @@ def predict_sequence(inf_encoder_model, inf_decoder_model, input_sequence, outpu
 
     return np.array(prediction)
 
+
 def plot_acc(history_dict, epochs):
     acc = history_dict['acc']
     val_acc = history_dict['val_acc']
@@ -91,6 +96,7 @@ def plot_acc(history_dict, epochs):
     plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
+
 
 # MAIN
 # SEQ2SEQ

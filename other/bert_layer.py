@@ -85,7 +85,7 @@ class BertLayer(tf.layers.Layer):
             masked_reduce_mean = lambda x, m: tf.reduce_sum(mul_mask(x, m), axis=1) / (
                     tf.reduce_sum(m, axis=1, keepdims=True) + 1e-10)
             input_mask = tf.cast(input_mask, tf.float32)
-            pooled = masked_reduce_mean(result, input_mask)  # PROBLEM 2D
+            pooled = masked_reduce_mean(result, input_mask)  # TODO
         else:
             raise NameError(f"Undefined pooling type (must be either first or mean, but is {self.pooling}")
 

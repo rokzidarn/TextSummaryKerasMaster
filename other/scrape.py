@@ -36,7 +36,7 @@ def write_data(title, dir, text):
         i += 1
 
         try:
-            with codecs.open('data/'+dir+'/'+title+'.txt', 'w', encoding='utf8') as f:  # write to file
+            with codecs.open('../data/new/'+dir+'/'+title+'.txt', 'w', encoding='utf8') as f:  # write to file
                 for item in sentences:
                     f.write("{}\n".format(item))
         except:
