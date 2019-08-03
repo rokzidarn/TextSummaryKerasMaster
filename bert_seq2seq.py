@@ -6,6 +6,11 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import numpy as np
 from bert.tokenization import FullTokenizer
+import rouge
+from tensorflow.python.keras.layers import Input, GRU, Dense, BatchNormalization
+from tensorflow.python.keras.models import Model
+# from keras.models import Model
+# from keras.layers import Input, GRU, Dense, BatchNormalization
 
 
 class BertLayer(tf.layers.Layer):
@@ -53,25 +58,12 @@ class BertLayer(tf.layers.Layer):
         return input_shape[0], self.output_size
 
 
-def plot_training(history_dict, epochs):
-    loss = history_dict['loss']
-
-    fig = plt.figure()
-    plt.plot(epochs, loss, 'r')
-    plt.title('Training loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
-    # plt.show()
-    fig.savefig('data/models/bert.png')
-
-
-def read_data():
+def read_data_train():
     summaries = []
     articles = []
     titles = []
 
-    ddir = 'data/bert/'
+    ddir = 'data/bert/train/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -92,6 +84,19 @@ def read_data():
     return titles, summaries, articles
 
 
+def plot_training(history_dict, epochs):
+    loss = history_dict['loss']
+
+    fig = plt.figure()
+    plt.plot(epochs, loss, 'r')
+    plt.title('Training loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    # plt.show()
+    fig.savefig('data/models/bert_seq2seq.png')
+
+
 def create_tokenizer_from_hub_module(sess):
     bert_module = hub.Module("https://tfhub.dev/google/bert_multi_cased_L-12_H-768_A-12/1")
     tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
@@ -105,7 +110,7 @@ def create_tokenizer_from_hub_module(sess):
     return FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 
-def tokenize_samples(tokenizer, samples):  # TODO
+def tokenize_samples(tokenizer, samples):  # TODO: count number of [SEP] tokens needed
     words = []
 
     for sample in samples:
@@ -113,7 +118,7 @@ def tokenize_samples(tokenizer, samples):  # TODO
 
     max_seq_length = len(max(words, key=len))
 
-    return words, max_seq_length + 6  # TODO: count number of [SEP] tokens needed
+    return words, max_seq_length + 6
 
 
 def convert_sample(tokenizer, words, max_seq_length):
@@ -182,60 +187,72 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size):
-    enc_in_id = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-ids")  # None
-    enc_in_mask = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Masks")
-    enc_in_segment = tf.keras.layers.Input(shape=(None, ), name="Encoder-Input-Segment-ids")
+def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess):
+    # encoder
+    enc_in_id = Input(shape=(None, ), name="Encoder-Input-ids")  # None
+    enc_in_mask = Input(shape=(None, ), name="Encoder-Input-Masks")
+    enc_in_segment = Input(shape=(None, ), name="Encoder-Input-Segment-ids")
     bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]
 
     encoder_embeddings = BertLayer(name='Encoder-Bert-Layer')(bert_encoder_inputs)
-    encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+    encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
+    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     encoder_model = tf.keras.models.Model(inputs=bert_encoder_inputs, outputs=state_h, name='Encoder-Model')
     encoder_outputs = encoder_model(bert_encoder_inputs)
 
-    dec_in_id = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-ids")
-    dec_in_mask = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-Masks")
-    dec_in_segment = tf.keras.layers.Input(shape=(None,), name="Decoder-Input-Segment-ids")
+    # decoder
+    dec_in_id = Input(shape=(None,), name="Decoder-Input-ids")
+    dec_in_mask = Input(shape=(None,), name="Decoder-Input-Masks")
+    dec_in_segment = Input(shape=(None,), name="Decoder-Input-Segment-ids")
     bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
 
     decoder_embeddings = BertLayer(name='Decoder-Bert-Layer')(bert_decoder_inputs)
-    decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
-    decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
-    decoder_outputs = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
+    decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
-    seq2seq_model = tf.keras.models.Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
+    seq2seq_model = Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
                                                   dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(), loss='sparse_categorical_crossentropy',
+    seq2seq_model.summary()
+    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
 
-    return seq2seq_model
+    initialize_vars(sess)
+    history = seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
+                                 summary_input_ids, summary_input_masks, summary_segment_ids],
+                                numpy.expand_dims(target_input_ids, -1), epochs=epochs, batch_size=batch_size)
 
+    f = open("data/models/bert_results.txt", "w", encoding="utf-8")
+    f.write("BERT \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: 768 \n")
+    f.close()
 
-def inference(model, latent_dim):
-    encoder_model = model.get_layer('Encoder-Model')
+    history_dict = history.history
+    graph_epochs = range(1, epochs + 1)
+    plot_training(history_dict, graph_epochs)
 
-    # latent_dim = model.get_layer('Decoder-Bert-Layer').output_shape[-1]  # 768
-    dec_in_id = model.get_layer("Decoder-Input-ids").input
-    dec_in_mask = model.get_layer("Decoder-Input-Masks").input
-    dec_in_segment = model.get_layer("Decoder-Input-Segment-ids").input
+    # inference
+    encoder_model = seq2seq_model.get_layer('Encoder-Model')
+
+    dec_in_id = seq2seq_model.get_layer("Decoder-Input-ids").input
+    dec_in_mask = seq2seq_model.get_layer("Decoder-Input-Masks").input
+    dec_in_segment = seq2seq_model.get_layer("Decoder-Input-Segment-ids").input
     bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
-    decoder_embeddings = model.get_layer('Decoder-Bert-Layer')(bert_decoder_inputs)
+    decoder_embeddings = seq2seq_model.get_layer('Decoder-Bert-Layer')(bert_decoder_inputs)
 
-    decoder_embeddings = model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
-    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='Hidden-State-Input')
-    gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
-    decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
-    dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = tf.keras.models.Model([dec_in_id, dec_in_mask, dec_in_segment, gru_inference_state_input],
+    decoder_embeddings = seq2seq_model.get_layer('Decoder-Batchnormalization-1')(decoder_embeddings)
+    gru_inference_state_input = Input(shape=(latent_size,), name='Hidden-State-Input')
+    gru_out, gru_state_out = seq2seq_model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
+    decoder_outputs = seq2seq_model.get_layer('Decoder-Batchnormalization-2')(gru_out)
+    dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
+    decoder_model = Model([dec_in_id, dec_in_mask, dec_in_segment, gru_inference_state_input],
                                           [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
 
-def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
+def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer):
     input_ids, input_masks, segment_ids = inputs
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     it = 1
@@ -256,7 +273,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
-        if (predicted_word == "[SEP]") or (len(prediction) > max_len):
+        if (predicted_word == "[SEP]") or (len(prediction) > max_length_summary):
             stop_condition = True
 
         states_value = state
@@ -270,6 +287,48 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_len, tokenizer):
     return prediction[:-1]
 
 
+def prepare_results(metric, p, r, f):
+    return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
+
+
+def evaluate(encoder_model, decoder_model, titles_train, summaries_train, article_input_ids, article_input_masks, article_segment_ids, max_length_summary):
+    predictions = []
+
+    # testing
+    for i in range(len(titles_train)):
+        inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
+        prediction = predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer)
+
+        predictions.append(prediction)
+        print(prediction)
+        f = open("data/bert/predictions/" + titles_train[i] + ".txt", "w", encoding="utf-8")
+        f.write(str(prediction))
+        f.close()
+
+    # evaluation using ROUGE
+    evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
+                            max_n=3,
+                            limit_length=True,
+                            length_limit=100,
+                            length_limit_type='words',
+                            apply_avg=False,
+                            apply_best=True,
+                            alpha=0.5,  # default F1 score
+                            weight_factor=1.2,
+                            stemming=True)
+
+    all_hypothesis = [' '.join(prediction) for prediction in predictions]
+    all_references = [' '.join(summary) for summary in summaries_train]
+    scores = evaluator.get_scores(all_hypothesis, all_references)
+
+    f = open("data/models/bert_results.txt", "a", encoding="utf-8")
+    for metric, results in sorted(scores.items(), key=lambda x: x[0]):
+        score = prepare_results(metric, results['p'], results['r'], results['f'])
+        print(score)
+        f.write('\n' + score)
+    f.close()
+
+
 # MAIN
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
@@ -277,33 +336,21 @@ sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
 vocabulary_size = len(tokenizer.vocab)
 
-titles, summaries, articles = read_data()
-article_tokens, max_len_article = tokenize_samples(tokenizer, articles)
-summary_tokens, max_len_summary = tokenize_samples(tokenizer, summaries)
+titles_train, summaries_train, articles_train = read_data_train()
+article_tokens, max_length_article = tokenize_samples(tokenizer, articles_train)
+summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries_train)
 
-article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_len_article)
-summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_len_summary)
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_length_article)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_length_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-latent_size = 768
+latent_size = 128
 batch_size = 1
-epochs = 4
+epochs = 12
 
-seq2seq_model = seq2seq_architecture(latent_size, vocabulary_size)
-seq2seq_model.summary()
+# training
+encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess)
 
-initialize_vars(sess)
-
-seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
-                   summary_input_ids, summary_input_masks, summary_segment_ids],
-                  numpy.expand_dims(target_input_ids, -1), epochs=epochs, batch_size=batch_size)
-
-encoder_model, decoder_model = inference(seq2seq_model, latent_size)
-
-for i in range(3):
-    inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
-    prediction = predict_sequence(encoder_model, decoder_model, inputs, max_len_summary, tokenizer)
-
-    print('-')
-    print('Summary:', summary_tokens[i])
-    print('Prediction:', prediction)
+# testing
+evaluate(encoder_model, decoder_model, titles_train, summaries_train,
+         article_input_ids, article_input_masks, article_segment_ids, max_length_summary)

@@ -4,8 +4,12 @@ import codecs
 import itertools
 import numpy
 import matplotlib.pyplot as plt
-import tensorflow as tf
 import rouge
+from keras.preprocessing.sequence import pad_sequences
+from tensorflow.python.keras.layers import Input, GRU, Embedding, Dense, BatchNormalization, Conv1D, MaxPooling1D, Dropout, Flatten
+from tensorflow.python.keras.models import Model
+# from keras.models import Model
+# from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization, Conv1D, MaxPooling1D, Flatten, Dropout
 
 
 def read_data_train():
@@ -105,33 +109,33 @@ def plot_training(history_dict, epochs):
 
 def seq2seq_architecture(max_length_article, latent_size, embedding_size, vocabulary_size):
     # encoder
-    encoder_inputs = tf.keras.layers.Input(shape=(max_length_article,), name='Encoder-Input')
-    encoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                                   mask_zero=False)(encoder_inputs)
-    encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    encoder_conv = tf.keras.layers.Conv1D(filters=32, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
-    encoder_drop = tf.keras.layers.Dropout(0.25)(encoder_conv)
-    encoder_pool = tf.keras.layers.MaxPooling1D(pool_size=4)(encoder_drop)
-    encoder_flatten = tf.keras.layers.Flatten()(encoder_pool)
-    encoder_model = tf.keras.models.Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
+    encoder_inputs = Input(shape=(max_length_article,), name='Encoder-Input')
+    encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
+                                   mask_zero=False)(encoder_inputs)
+    encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
+    encoder_conv = Conv1D(filters=32, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
+    encoder_drop = Dropout(0.25)(encoder_conv)
+    encoder_pool = MaxPooling1D(pool_size=4)(encoder_drop)
+    encoder_flatten = Flatten()(encoder_pool)
+    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
     # decoder
-    decoder_inputs = tf.keras.layers.Input(shape=(None,), name='Decoder-Input')
-    decoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                                   mask_zero=False)(decoder_inputs)
-    decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
-    decoder_conv = tf.keras.layers.Conv1D(filters=16, kernel_size=2, padding='same', activation='relu', name='Decoder-Conv1D') \
+    decoder_inputs = Input(shape=(None,), name='Decoder-Input')
+    decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
+                                   mask_zero=False)(decoder_inputs)
+    decoder_embeddings = BatchNormalization(name='Decoder-Batchnormalization-1')(decoder_embeddings)
+    decoder_conv = Conv1D(filters=16, kernel_size=2, padding='same', activation='relu', name='Decoder-Conv1D') \
         (decoder_embeddings)
-    decoder_drop = tf.keras.layers.Dropout(0.25, name='Decoder-Conv1D-Dropout')(decoder_conv)
-    decoder_pool = tf.keras.layers.MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
+    decoder_drop = Dropout(0.25, name='Decoder-Conv1D-Dropout')(decoder_conv)
+    decoder_pool = MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
 
-    decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_pool, initial_state=encoder_outputs)
-    decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
-    decoder_outputs = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batchnormalization-2')(decoder_gru_outputs)
+    decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
-    seq2seq_model = tf.keras.models.Model([encoder_inputs, decoder_inputs], decoder_outputs)
+    seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
 
     return seq2seq_model
 
@@ -146,11 +150,11 @@ def inference(model):
     decoder_conv = model.get_layer('Decoder-Conv1D')(decoder_embeddings)
     decoder_drop = model.get_layer('Decoder-Conv1D-Dropout')(decoder_conv)
     decoder_pool = model.get_layer('Decoder-MaxPool1D')(decoder_drop)
-    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_dim,), name='Hidden-State-Input')
+    gru_inference_state_input = Input(shape=(latent_dim,), name='Hidden-State-Input')
     gru_out, gru_state_out = model.get_layer('Decoder-GRU')([decoder_pool, gru_inference_state_input])
     decoder_outputs = model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = tf.keras.models.Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
@@ -195,7 +199,8 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
                                       max_length_summary)
 
         predictions.append(prediction)
-        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w")
+        print(prediction)
+        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w", encoding="utf-8")
         f.write(str(prediction))
         f.close()
 
@@ -215,9 +220,11 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     all_references = [' '.join(summary) for summary in summaries_train]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/conv_results.txt", "a")
+    f = open("data/models/conv_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
-        f.write('\n' + prepare_results(metric, results['p'], results['r'], results['f']))
+        score = prepare_results(metric, results['p'], results['r'], results['f'])
+        print(score)
+        f.write('\n' + score)
     f.close()
 
 
@@ -250,9 +257,9 @@ articles_vectors = pre_process(articles_clean, word2idx)
 target_vectors = process_targets(summaries_clean, word2idx)
 
 # padded array of summaries/articles, added at the end
-X_summary = tf.keras.preprocessing.sequence.pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
-X_article = tf.keras.preprocessing.sequence.pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
-Y_target = tf.keras.preprocessing.sequence.pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
+X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
+X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
+Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
 # model hyper parameters
 latent_size = 96  # number of units (output dimensionality)
@@ -263,12 +270,12 @@ epochs = 12
 # training
 seq2seq_model = seq2seq_architecture(max_length_article, latent_size, embedding_size, vocabulary_size)
 seq2seq_model.summary()
-seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(), loss='sparse_categorical_crossentropy',
+seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                       metrics=['sparse_categorical_accuracy'])
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 
-f = open("data/models/conv_results.txt", "w")
+f = open("data/models/conv_results.txt", "w", encoding="utf-8")
 f.write("Conv \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
 f.close()
 

@@ -4,9 +4,12 @@ import codecs
 import itertools
 import numpy
 import matplotlib.pyplot as plt
-import tensorflow as tf
 import rouge
-
+from keras.preprocessing.sequence import pad_sequences
+from tensorflow.python.keras.layers import Input, GRU, Embedding, Dense, BatchNormalization
+from tensorflow.python.keras.models import Model
+# from keras.models import Model
+# from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 
 def read_data_train():
     summaries = []
@@ -105,40 +108,40 @@ def plot_training(history_dict, epochs):
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs):
     # encoder
-    encoder_inputs = tf.keras.layers.Input(shape=(None,), name='Encoder-Input')
-    encoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                                   mask_zero=True)(encoder_inputs)
-    encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h = tf.keras.layers.GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
+    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
+    encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
+                                   mask_zero=False)(encoder_inputs)
+    encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
+    _, state_h = GRU(latent_size, return_state=True, name='Encoder-GRU')(encoder_embeddings)
     # returns last state (hidden state), discard encoder_outputs, only keep the states
     # return state = returns the hidden state output for the last input time step
 
-    encoder_model = tf.keras.models.Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
+    encoder_model = Model(inputs=encoder_inputs, outputs=state_h, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
     # decoder
-    decoder_inputs = tf.keras.layers.Input(shape=(None,), name='Decoder-Input')
-    decoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                                   mask_zero=True)(decoder_inputs)
-    decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-    decoder_gru = tf.keras.layers.GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_inputs = Input(shape=(None,), name='Decoder-Input')
+    decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
+                                   mask_zero=False)(decoder_inputs)
+    decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     # return state needed for inference
     # return_sequence = returns the hidden state output for each input time step
 
     # set up decoder, using encoder_states as initial state
     decoder_gru_outputs, _ = decoder_gru(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
-    decoder_outputs = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
+    decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
-    seq2seq_model = tf.keras.models.Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(), loss='sparse_categorical_crossentropy',
+    seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
 
     seq2seq_model.summary()
     history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                                 batch_size=batch_size, epochs=epochs)
 
-    f = open("data/models/gru_results.txt", "w")
+    f = open("data/models/gru_results.txt", "w", encoding="utf-8")
     f.write("GRU \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
     f.close()
 
@@ -152,12 +155,12 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_siz
     decoder_inputs = seq2seq_model.get_layer('Decoder-Input').input
     decoder_embeddings = seq2seq_model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = seq2seq_model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-    gru_inference_state_input = tf.keras.layers.Input(shape=(latent_size,), name='Hidden-State-Input')
+    gru_inference_state_input = Input(shape=(latent_size,), name='Hidden-State-Input')
 
     gru_out, gru_state_out = seq2seq_model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
     decoder_outputs = seq2seq_model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
     dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = tf.keras.models.Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
+    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
@@ -197,12 +200,13 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
 
     # testing
     for index in range(len(titles_train)):
-        input_sequence = X_article[index]
+        input_sequence = X_article[index:index+1]
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word,
                                       max_length_summary)
 
         predictions.append(prediction)
-        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w")
+        print(prediction)
+        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w", encoding="utf-8")
         f.write(str(prediction))
         f.close()
 
@@ -222,9 +226,11 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     all_references = [' '.join(summary) for summary in summaries_train]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/gru_results.txt", "a")
+    f = open("data/models/gru_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
-        f.write('\n' + prepare_results(metric, results['p'], results['r'], results['f']))
+        score = prepare_results(metric, results['p'], results['r'], results['f'])
+        print(score)
+        f.write('\n' + score)
     f.close()
 
 
@@ -257,9 +263,9 @@ summaries_vectors = pre_process(summaries_train, word2idx)
 articles_vectors = pre_process(articles_train, word2idx)
 target_vectors = process_targets(summaries_train, word2idx)
 
-X_summary = tf.keras.preprocessing.sequence.pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
-X_article = tf.keras.preprocessing.sequence.pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
-Y_target = tf.keras.preprocessing.sequence.pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
+X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
+X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
+Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)

@@ -4,8 +4,12 @@ import codecs
 import itertools
 import numpy
 import matplotlib.pyplot as plt
-import tensorflow as tf
 import rouge
+from keras.preprocessing.sequence import pad_sequences
+from tensorflow.python.keras.layers import Input, LSTM, Embedding, Dense, BatchNormalization
+from tensorflow.python.keras.models import Model
+# from keras.models import Model
+# from keras.layers import Input, LSTM, Embedding, Dense, BatchNormalization
 
 
 def read_data_train():
@@ -100,78 +104,87 @@ def plot_training(history_dict, epochs):
     plt.ylabel('Loss')
     plt.legend()
     # plt.show()
-    fig.savefig('data/models/gru_stacked_seq2seq.png')
+    fig.savefig('data/models/lstm_stacked_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs):
     # encoder
-    encoder_inputs = tf.keras.layers.Input(shape=(None,), name='Encoder-Input')
-    encoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
-                                                   mask_zero=True)
-    norm_encoder_embeddings = tf.keras.layers.BatchNormalization(name='Encoder-Batch-Normalization')
+    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
+    encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
+                                   mask_zero=False)
+    norm_encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')
 
-    encoder_gru_1 = tf.keras.layers.GRU(latent_size, name='Encoder-GRU-1', return_state=True, return_sequences=True)
-    encoder_gru_2 = tf.keras.layers.GRU(latent_size, name='Encoder-GRU-2', return_state=True)
+    encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_sequences=True, return_state=True)
+    encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_state=True)
+    # the sequence of the last layer is not returned because we want a single vector that stores everything
 
     e = encoder_embeddings(encoder_inputs)
     e = norm_encoder_embeddings(e)
-    e, e_state_h_1 = encoder_gru_1(e)
-    e, e_state_h_2 = encoder_gru_2(e)
+    e, e_state_h_1, e_state_c_1 = encoder_lstm_1(e)
+    e, e_state_h_2, e_state_c_2 = encoder_lstm_2(e)
     encoder_outputs = e  # the encoded, fix-sized vector which seq2seq is all about
-    encoder_states = e_state_h_2
+    encoder_states = [e_state_h_2, e_state_c_2]
 
-    encoder_model = tf.keras.models.Model(inputs=encoder_inputs, outputs=encoder_states)
+    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states)
 
     # decoder
-    decoder_inputs = tf.keras.layers.Input(shape=(None,), name='Decoder-Input')
-    decoder_embeddings = tf.keras.layers.Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
-                                                   mask_zero=True)
-    norm_decoder_embeddings = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-1')
+    decoder_inputs = Input(shape=(None,), name='Decoder-Input')
+    decoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Decoder-Word-Embedding',
+                                   mask_zero=False)
+    norm_decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')
 
-    decoder_gru_1 = tf.keras.layers.GRU(latent_size, name='Decoder-GRU-1', return_state=True, return_sequences=True)
-    decoder_gru_2 = tf.keras.layers.GRU(latent_size, name='Decoder-GRU-2', return_state=True, return_sequences=True)
-    norm_decoder = tf.keras.layers.BatchNormalization(name='Decoder-Batch-Normalization-2')
-    decoder_dense = tf.keras.layers.Dense(vocabulary_size, activation='softmax', name="Final-Output-Dense")
+    decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True, return_state=True)
+    decoder_lstm_2 = LSTM(latent_size, name='Decoder-LSTM-2', return_sequences=True, return_state=True)
+    norm_decoder = BatchNormalization(name='Decoder-Batch-Normalization-2')
+    decoder_dense = Dense(vocabulary_size, activation='softmax', name="Final-Output-Dense")
 
     d = decoder_embeddings(decoder_inputs)
     d = norm_decoder_embeddings(d)
-    d, d_state_h_1 = decoder_gru_1(d, initial_state=encoder_states)
-    d, d_state_h_2 = decoder_gru_2(d, initial_state=encoder_states)
+    d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=encoder_states)
+    d, d_state_h_2, d_state_c_2 = decoder_lstm_2(d, initial_state=encoder_states)
     d = norm_decoder(d)
     decoder_outputs = decoder_dense(d)
 
-    seq2seq_model = tf.keras.models.Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
+    seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
+    # https://stackoverflow.com/questions/52465971/keras-seq2seq-stacked-layers
 
     seq2seq_model.summary()
-    seq2seq_model.compile(optimizer=tf.keras.optimizers.RMSprop(), loss='sparse_categorical_crossentropy',
+    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
 
     history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                                 batch_size=batch_size, epochs=epochs)
+
+    f = open("data/models/lstm_stacked_results.txt", "w", encoding="utf-8")
+    f.write("Stacked LSTM \n layers: 2 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
+    f.close()
 
     history_dict = history.history
     graph_epochs = range(1, epochs + 1)
     plot_training(history_dict, graph_epochs)
 
     # inference
-    decoder_initial_state_h1 = tf.keras.layers.Input(shape=(latent_size,), name='Decoder-Init-H1')
-    decoder_initial_state_h2 = tf.keras.layers.Input(shape=(latent_size,), name='Decoder-Init-H2')
+    decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
+    decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
+    decoder_initial_state_h2 = Input(shape=(latent_size,), name='Decoder-Init-H2')
+    decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
 
     i = decoder_embeddings(decoder_inputs)
     i = norm_decoder_embeddings(i)
-    i, h1 = decoder_gru_1(i, initial_state=decoder_initial_state_h1)
-    i, h2 = decoder_gru_2(i, initial_state=decoder_initial_state_h2)
+    i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
+    i, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
     i = norm_decoder(i)
     decoder_output = decoder_dense(i)
-    decoder_states = [h1, h2]  # every layer keeps its own states, important at predicting
+    decoder_states = [h1, c1, h2, c2]  # every layer keeps its own states, important at predicting
 
-    decoder_model = tf.keras.Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_h2],
-                                   outputs=[decoder_output] + decoder_states)
+    decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_h1, decoder_initial_state_c1,
+                                                     decoder_initial_state_h2, decoder_initial_state_c2],
+                          outputs=[decoder_output] + decoder_states)
 
     return encoder_model, decoder_model
 
 
-def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len_summary):  # TODO
+def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len_summary):
     # encode the input as state vectors
     states_value = encoder_model.predict(input_sequence)
     # simply repeat the encoder states since  both decoding layers were trained on the encoded-vector as initialization
@@ -183,7 +196,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
 
     while not stop_condition:
-        candidates, h1, h2 = decoder_model.predict([target_sequence] + states_value)
+        candidates, h1, c1, h2, c2 = decoder_model.predict([target_sequence] + states_value)
 
         predicted_word_index = numpy.argmax(candidates)  # greedy search
         predicted_word = idx2word[predicted_word_index]
@@ -193,7 +206,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         if (predicted_word == '<END>') or (len(prediction) > max_len_summary):
             stop_condition = True
 
-        states_value = [h1, h2]
+        states_value = [h1, c1, h2, c2]
         target_sequence = numpy.array(predicted_word_index).reshape(1, 1)  # previous character
 
     return prediction[:-1]
@@ -213,7 +226,8 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
                                       max_length_summary)
 
         predictions.append(prediction)
-        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w")
+        print(prediction)
+        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w", encoding="utf-8")
         f.write(str(prediction))
         f.close()
 
@@ -233,9 +247,11 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     all_references = [' '.join(summary) for summary in summaries_train]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/lstm_stacked_results.txt", "a")
+    f = open("data/models/lstm_stacked_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
-        f.write('\n' + prepare_results(metric, results['p'], results['r'], results['f']))
+        score = prepare_results(metric, results['p'], results['r'], results['f'])
+        print(score)
+        f.write('\n' + score)
     f.close()
 
 
@@ -268,9 +284,9 @@ summaries_vectors = pre_process(summaries_train, word2idx)
 articles_vectors = pre_process(articles_train, word2idx)
 target_vectors = process_targets(summaries_train, word2idx)
 
-X_summary = tf.keras.preprocessing.sequence.pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
-X_article = tf.keras.preprocessing.sequence.pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
-Y_target = tf.keras.preprocessing.sequence.pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
+X_summary = pad_sequences(summaries_vectors, maxlen=max_length_summary, padding='post')
+X_article = pad_sequences(articles_vectors, maxlen=max_length_article, padding='post')
+Y_target = pad_sequences(target_vectors, maxlen=max_length_summary, padding='post')
 
 # model hyper parameters
 latent_size = 128  # number of units (output dimensionality)
