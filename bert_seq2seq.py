@@ -113,26 +113,18 @@ def create_tokenizer_from_hub_module(sess):
 
 def tokenize_samples(tokenizer, samples):
     words = []
-    periods = []  # count for special tokens, [CLS], [SEP]
-    exclamations = []
-    questions = []
 
     for sample in samples:
         tokens = tokenizer.tokenize(sample)
         tokens.append("<T>")  # special end token
-
-        periods.append(tokens.count("."))
-        exclamations.append(tokens.count("!"))
-        questions.append(tokens.count("?"))
         words.append(tokens)
 
-    max_seq_length = len(max(words, key=len))
-    max_special_tokens = max(periods) + max(exclamations) + max(questions) + 1
+    max_len = len(max(words, key=len))
 
-    return words, max_seq_length, max_special_tokens
+    return words, max_len
 
 
-def convert_sample(tokenizer, words, max_seq_length):
+def convert_sample(tokenizer, words):
     it = 1
     tokens = []
     segment_ids = []
@@ -147,28 +139,37 @@ def convert_sample(tokenizer, words, max_seq_length):
             segment_ids.append(it)
             it += 1
 
+    segment_ids[-1] = segment_ids[-1] - 1  # fix special end token
+
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
     # the mask has 1 for real tokens and 0 for padding tokens, only real tokens are attended to
     input_masks = [1] * len(input_ids)
 
-    # zero-pad up to the sequence length
-    while len(input_ids) < max_seq_length:
-        input_ids.append(0)
-        input_masks.append(0)
-        segment_ids.append(0)
-
     return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
 
 
-def vectorize_features(tokenizer, samples, max_seq_length):
+def vectorize_features(tokenizer, samples):
+    t_input_ids, t_input_masks, t_segment_ids = [], [], []
     input_ids, input_masks, segment_ids = [], [], []
 
     for sample in samples:
-        input_id, input_mask, segment_id = convert_sample(tokenizer, sample, max_seq_length)
-        input_ids.append(input_id)
-        input_masks.append(input_mask)
-        segment_ids.append(segment_id)
+        t_input_id, t_input_mask, t_segment_id = convert_sample(tokenizer, sample)
+        t_input_ids.append(t_input_id)
+        t_input_masks.append(t_input_mask)
+        t_segment_ids.append(t_segment_id)
+
+    max_pad_seq_length = len(max(t_segment_ids, key=len))
+
+    for i in range(len(samples)):
+        t_id = t_input_ids[i]
+        t_mask = t_input_masks[i]
+        t_segment = t_segment_ids[i]
+
+        zeros = np.zeros(max_pad_seq_length - len(t_id))
+        input_ids.append(np.concatenate((t_id, zeros)))
+        input_masks.append(np.concatenate((t_mask, zeros)))
+        segment_ids.append(np.concatenate((t_segment, zeros)))
 
     return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
 
@@ -229,7 +230,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     decoder_outputs = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
-                                                  dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
+                                  dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
     seq2seq_model.summary()
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
@@ -261,6 +262,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     gru_out, gru_state_out = seq2seq_model.get_layer('Decoder-GRU')([decoder_embeddings, gru_inference_state_input])
     decoder_outputs = seq2seq_model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
+
     decoder_model = Model([dec_in_id, dec_in_mask, dec_in_segment, gru_inference_state_input],
                           [dense_out, gru_state_out])
 
@@ -353,13 +355,11 @@ vocabulary_size = len(tokenizer.vocab)  # <T>
 
 titles, summaries, articles = read_data()
 dataset_size = len(titles)
-article_tokens, max_length_article, max_special_tokens_article = tokenize_samples(tokenizer, articles)
-summary_tokens, max_length_summary, max_special_tokens_summary = tokenize_samples(tokenizer, summaries)
+article_tokens, max_length_article = tokenize_samples(tokenizer, articles)
+summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries)
 
-article_input_ids, article_input_masks, article_segment_ids = vectorize_features(
-    tokenizer, article_tokens, max_length_article + max_special_tokens_article)
-summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(
-    tokenizer, summary_tokens, max_length_summary + max_special_tokens_summary)
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens)
 target_input_ids, target_masks, target_segment_ids = create_targets(
     summary_input_ids, summary_input_masks, summary_segment_ids)
 
