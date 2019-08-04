@@ -5,18 +5,20 @@ import itertools
 import numpy
 import matplotlib.pyplot as plt
 import rouge
+import tensorflow as tf
 from keras.preprocessing.sequence import pad_sequences
 from tensorflow.python.keras.layers import Input, GRU, Embedding, Dense, BatchNormalization
 from tensorflow.python.keras.models import Model
 # from keras.models import Model
 # from keras.layers import Input, GRU, Dense, Embedding, BatchNormalization
 
+
 def read_data_train():
     summaries = []
     articles = []
     titles = []
 
-    ddir = 'data/bert/train/'
+    ddir = 'data/bert/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -106,7 +108,7 @@ def plot_training(history_dict, epochs):
     fig.savefig('data/models/gru_seq2seq.png')
 
 
-def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs):
+def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs, sess):
     # encoder
     encoder_inputs = Input(shape=(None,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, name='Encoder-Word-Embedding',
@@ -138,6 +140,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_siz
                           metrics=['sparse_categorical_accuracy'])
 
     seq2seq_model.summary()
+    initialize_vars(sess)
     history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                                 batch_size=batch_size, epochs=epochs)
 
@@ -234,7 +237,16 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     f.close()
 
 
+def initialize_vars(sess):
+    sess.run(tf.local_variables_initializer())
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.tables_initializer())
+    tf.keras.backend.set_session(sess)
+
+
 # MAIN
+
+sess = tf.Session()
 
 # 1D array, each element is string of sentences, separated by newline
 titles_train, summaries_train, articles_train = read_data_train()
@@ -274,7 +286,7 @@ batch_size = 1
 epochs = 12
 
 # training
-encoder_model, decoder_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs)
+encoder_model, decoder_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size, batch_size, epochs, sess)
 
 # testing
 evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_article, word2idx, idx2word, max_length_summary)

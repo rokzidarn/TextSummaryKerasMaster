@@ -5,6 +5,7 @@ import itertools
 import numpy
 import matplotlib.pyplot as plt
 import rouge
+import tensorflow as tf
 from keras.preprocessing.sequence import pad_sequences
 from tensorflow.python.keras.layers import Input, GRU, Embedding, Dense, BatchNormalization, Conv1D, MaxPooling1D, Dropout, Flatten
 from tensorflow.python.keras.models import Model
@@ -17,7 +18,7 @@ def read_data_train():
     articles = []
     titles = []
 
-    ddir = 'data/bert/train/'
+    ddir = 'data/bert/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -228,7 +229,16 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     f.close()
 
 
+def initialize_vars(sess):
+    sess.run(tf.local_variables_initializer())
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.tables_initializer())
+    tf.keras.backend.set_session(sess)
+
+
 # MAIN
+
+sess = tf.Session()
 
 # 1D array, each element is string of sentences, separated by newline
 titles, summaries_read, articles_read = read_data_train()
@@ -272,6 +282,7 @@ seq2seq_model = seq2seq_architecture(max_length_article, latent_size, embedding_
 seq2seq_model.summary()
 seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                       metrics=['sparse_categorical_accuracy'])
+initialize_vars(sess)
 history = seq2seq_model.fit(x=[X_article, X_summary], y=numpy.expand_dims(Y_target, -1),
                             batch_size=batch_size, epochs=epochs)
 

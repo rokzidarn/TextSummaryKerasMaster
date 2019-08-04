@@ -58,12 +58,13 @@ class BertLayer(tf.layers.Layer):
         return input_shape[0], self.output_size
 
 
-def read_data_train():
+def read_data():
     summaries = []
     articles = []
     titles = []
 
-    ddir = 'data/bert/train/'
+    ddir = 'data/bert/'
+
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -110,15 +111,26 @@ def create_tokenizer_from_hub_module(sess):
     return FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 
-def tokenize_samples(tokenizer, samples):  # TODO: count number of [SEP] tokens needed
+def tokenize_samples(tokenizer, samples):
     words = []
+    periods = []  # count for special tokens, [CLS], [SEP]
+    exclamations = []
+    questions = []
 
     for sample in samples:
-        words.append(tokenizer.tokenize(sample))
+        tokens = tokenizer.tokenize(sample)  # TODO: define special end token
+
+        periods.append(tokens.count("."))
+        exclamations.append(tokens.count("!"))
+        questions.append(tokens.count("?"))
+        words.append(tokens)
 
     max_seq_length = len(max(words, key=len))
+    max_periods = max(periods)
+    max_exclamations = max(exclamations)
+    max_questions = max(questions)
 
-    return words, max_seq_length + 6
+    return words, max_seq_length + max_periods + max_exclamations + max_questions + 2
 
 
 def convert_sample(tokenizer, words, max_seq_length):
@@ -273,7 +285,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
-        if (predicted_word == "[SEP]") or (len(prediction) > max_length_summary):
+        if (predicted_word == "[SEP]") or (len(prediction) > max_length_summary):  # TODO: define special end token
             stop_condition = True
 
         states_value = state
@@ -291,18 +303,18 @@ def prepare_results(metric, p, r, f):
     return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
 
 
-def evaluate(encoder_model, decoder_model, titles_train, summaries_train, article_input_ids, article_input_masks, article_segment_ids, max_length_summary):
+def evaluate(encoder_model, decoder_model, titles, summaries, article_input_ids, article_input_masks, article_segment_ids, max_length_summary):
     predictions = []
 
     # testing
-    for i in range(len(titles_train)):
+    for i in range(len(titles)):
         inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
         prediction = predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer)
 
         predictions.append(prediction)
         print(prediction)
-        f = open("data/bert/predictions/" + titles_train[i] + ".txt", "w", encoding="utf-8")
-        f.write(str(prediction))
+        f = open("data/bert/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
+        f.write(' '.join(prediction))
         f.close()
 
     # evaluation using ROUGE
@@ -318,7 +330,7 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, articl
                             stemming=True)
 
     all_hypothesis = [' '.join(prediction) for prediction in predictions]
-    all_references = [' '.join(summary) for summary in summaries_train]
+    all_references = [' '.join(summary) for summary in summaries]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
     f = open("data/models/bert_results.txt", "a", encoding="utf-8")
@@ -336,15 +348,17 @@ sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
 vocabulary_size = len(tokenizer.vocab)
 
-titles_train, summaries_train, articles_train = read_data_train()
-article_tokens, max_length_article = tokenize_samples(tokenizer, articles_train)
-summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries_train)
+titles, summaries, articles = read_data()
+article_tokens, max_length_article = tokenize_samples(tokenizer, articles)
+summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_length_article)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_length_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
 
-latent_size = 128
+# TODO: split train/test set
+
+latent_size = 256
 batch_size = 1
 epochs = 12
 
@@ -352,5 +366,5 @@ epochs = 12
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess)
 
 # testing
-evaluate(encoder_model, decoder_model, titles_train, summaries_train,
+evaluate(encoder_model, decoder_model, titles, summary_tokens,
          article_input_ids, article_input_masks, article_segment_ids, max_length_summary)

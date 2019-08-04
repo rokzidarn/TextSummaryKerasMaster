@@ -138,7 +138,7 @@ def read_data_train():
     articles = []
     titles = []
 
-    ddir = 'data/bert/train/'
+    ddir = 'data/bert/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -228,7 +228,7 @@ def plot_training(history_dict, epochs):
     fig.savefig('data/models/attention_seq2seq.png')
 
 
-def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_article, batch_size, epochs):
+def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_article, batch_size, epochs, sess):
     # encoder
     encoder_inputs = Input(shape=(max_len_article,))
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, trainable=True)(encoder_inputs)
@@ -253,11 +253,12 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_a
     decoder_outputs = decoder_dense(decoder_concat_input)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.summary()
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
 
     # es = EarlyStopping(monitor='val_loss', mode='min', verbose=1)  # stop training once validation loss increases
+    seq2seq_model.summary()
+    initialize_vars(sess)
     history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                                 batch_size=batch_size, epochs=epochs)
 
@@ -358,8 +359,17 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     f.close()
 
 
+def initialize_vars(sess):
+    sess.run(tf.local_variables_initializer())
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.tables_initializer())
+    tf.keras.backend.set_session(sess)
+
+
 # MAIN
 # https://www.analyticsvidhya.com/blog/2019/06/comprehensive-guide-text-summarization-using-deep-learning-python/
+
+sess = tf.Session()
 
 # 1D array, each element is string of sentences, separated by newline
 titles_train, summaries_train, articles_train = read_data_train()
@@ -399,7 +409,8 @@ batch_size = 1
 epochs = 12
 
 # training
-encoder_model, decoder_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_length_article, batch_size, epochs)
+encoder_model, decoder_model = seq2seq_architecture(latent_size, embedding_size, vocabulary_size,
+                                                    max_length_article, batch_size, epochs, sess)
 
 # testing
 evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_article, word2idx, idx2word, max_length_summary)
