@@ -14,8 +14,8 @@ from tensorflow.python.keras.models import Model
 
 
 class BertLayer(tf.layers.Layer):
-    def __init__(self, n_fine_tune_layers=0, **kwargs):
-        # TODO: 3 = low loss+high acc (less trainable params), 0 = high loss+low acc (more trainable params)
+    def __init__(self, n_fine_tune_layers=8, **kwargs):
+        # TODO: 8 = low loss+high acc (less trainable params), 0 = high loss+low acc (more trainable params)
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
         self.output_size = 768
@@ -118,7 +118,8 @@ def tokenize_samples(tokenizer, samples):
     questions = []
 
     for sample in samples:
-        tokens = tokenizer.tokenize(sample)  # TODO: define special end token
+        tokens = tokenizer.tokenize(sample)
+        tokens.append("<T>")  # special end token
 
         periods.append(tokens.count("."))
         exclamations.append(tokens.count("!"))
@@ -126,11 +127,9 @@ def tokenize_samples(tokenizer, samples):
         words.append(tokens)
 
     max_seq_length = len(max(words, key=len))
-    max_periods = max(periods)
-    max_exclamations = max(exclamations)
-    max_questions = max(questions)
+    max_special_tokens = max(periods) + max(exclamations) + max(questions) + 1
 
-    return words, max_seq_length + max_periods + max_exclamations + max_questions + 2
+    return words, max_seq_length, max_special_tokens
 
 
 def convert_sample(tokenizer, words, max_seq_length):
@@ -199,7 +198,11 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess):
+def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target):
+    (article_input_ids, article_input_masks, article_segment_ids) = train_data_article
+    (summary_input_ids, summary_input_masks, summary_segment_ids) = train_data_summary
+    (target_input_ids, target_masks, target_segment_ids) = train_data_target
+
     # encoder
     enc_in_id = Input(shape=(None, ), name="Encoder-Input-ids")  # None
     enc_in_mask = Input(shape=(None, ), name="Encoder-Input-Masks")
@@ -259,7 +262,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess)
     decoder_outputs = seq2seq_model.get_layer('Decoder-Batchnormalization-2')(gru_out)
     dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
     decoder_model = Model([dec_in_id, dec_in_mask, dec_in_segment, gru_inference_state_input],
-                                          [dense_out, gru_state_out])
+                          [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
@@ -285,7 +288,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
-        if (predicted_word == "[SEP]") or (len(prediction) > max_length_summary):  # TODO: define special end token
+        if (predicted_word == "<T>") or (len(prediction) > max_length_summary):
             stop_condition = True
 
         states_value = state
@@ -303,16 +306,16 @@ def prepare_results(metric, p, r, f):
     return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0 * p, 'R', 100.0 * r, 'F1', 100.0 * f)
 
 
-def evaluate(encoder_model, decoder_model, titles, summaries, article_input_ids, article_input_masks, article_segment_ids, max_length_summary):
+def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article, max_length_summary):
+    (article_input_ids, article_input_masks, article_segment_ids) = test_data_article
     predictions = []
 
     # testing
     for i in range(len(titles)):
         inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
         prediction = predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer)
-
         predictions.append(prediction)
-        print(prediction)
+
         f = open("data/bert/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
         f.write(' '.join(prediction))
         f.close()
@@ -346,25 +349,36 @@ def evaluate(encoder_model, decoder_model, titles, summaries, article_input_ids,
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
 sess = tf.Session()
 tokenizer = create_tokenizer_from_hub_module(sess)
-vocabulary_size = len(tokenizer.vocab)
+vocabulary_size = len(tokenizer.vocab)  # <T>
 
 titles, summaries, articles = read_data()
-article_tokens, max_length_article = tokenize_samples(tokenizer, articles)
-summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries)
+dataset_size = len(titles)
+article_tokens, max_length_article, max_special_tokens_article = tokenize_samples(tokenizer, articles)
+summary_tokens, max_length_summary, max_special_tokens_summary = tokenize_samples(tokenizer, summaries)
 
-article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_length_article)
-summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_length_summary)
-target_input_ids, target_masks, target_segment_ids = create_targets(summary_input_ids, summary_input_masks, summary_segment_ids)
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(
+    tokenizer, article_tokens, max_length_article + max_special_tokens_article)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(
+    tokenizer, summary_tokens, max_length_summary + max_special_tokens_summary)
+target_input_ids, target_masks, target_segment_ids = create_targets(
+    summary_input_ids, summary_input_masks, summary_segment_ids)
 
-# TODO: split train/test set
+train = int(round(dataset_size * 0.8))
+test = int(round(dataset_size * 0.2))
+
+train_data_article = (article_input_ids[:train], article_input_masks[:train], article_segment_ids[:train])
+train_data_summary = (summary_input_ids[:train], summary_input_masks[:train], summary_segment_ids[:train])
+train_data_target = (target_input_ids[:train], target_masks[:train], target_segment_ids[:train])
+
+test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
 latent_size = 256
 batch_size = 1
 epochs = 12
 
 # training
-encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess)
+encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
+                                                    train_data_article, train_data_summary, train_data_target)
 
 # testing
-evaluate(encoder_model, decoder_model, titles, summary_tokens,
-         article_input_ids, article_input_masks, article_segment_ids, max_length_summary)
+evaluate(encoder_model, decoder_model, titles[-test:], summary_tokens[-test:], test_data_article, max_length_summary)
