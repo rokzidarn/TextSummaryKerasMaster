@@ -14,8 +14,7 @@ from tensorflow.python.keras.models import Model
 
 
 class BertLayer(tf.layers.Layer):
-    def __init__(self, n_fine_tune_layers=8, **kwargs):
-        # TODO: 8 = low loss+high acc (less trainable params), 0 = high loss+low acc (more trainable params)
+    def __init__(self, n_fine_tune_layers=10, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
         self.output_size = 768
@@ -108,20 +107,23 @@ def create_tokenizer_from_hub_module(sess):
         ]
     )
 
-    return FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
+    return FullTokenizer(vocab_file=vocab_file, do_lower_case=False)
 
 
-def tokenize_samples(tokenizer, samples):
+def tokenize_samples(tokenizer, samples, titles):
     words = []
 
-    for sample in samples:
-        tokens = tokenizer.tokenize(sample)
+    for i in range(len(samples)):
+        tokens = tokenizer.tokenize(samples[i])
         tokens.append("<T>")  # special end token
         words.append(tokens)
+        # print(titles[i], len(tokens))
 
     max_len = len(max(words, key=len))
+    min_len = len(min(words, key=len))
+    avg_len = int(round(sum([len(x) for x in words])/len(samples)))
 
-    return words, max_len
+    return words, max_len, min_len, avg_len
 
 
 def convert_sample(tokenizer, words):
@@ -166,7 +168,7 @@ def vectorize_features(tokenizer, samples):
         t_mask = t_input_masks[i]
         t_segment = t_segment_ids[i]
 
-        zeros = np.zeros(max_pad_seq_length - len(t_id))
+        zeros = np.zeros(max_pad_seq_length - len(t_id), dtype=int)
         input_ids.append(np.concatenate((t_id, zeros)))
         input_masks.append(np.concatenate((t_mask, zeros)))
         segment_ids.append(np.concatenate((t_segment, zeros)))
@@ -199,7 +201,7 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target):
+def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target, pad_len_article, pad_len_summary):
     (article_input_ids, article_input_masks, article_segment_ids) = train_data_article
     (summary_input_ids, summary_input_masks, summary_segment_ids) = train_data_summary
     (target_input_ids, target_masks, target_segment_ids) = train_data_target
@@ -317,6 +319,7 @@ def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article,
         inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
         prediction = predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer)
         predictions.append(prediction)
+        print(prediction)
 
         f = open("data/bert/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
         f.write(' '.join(prediction))
@@ -350,21 +353,32 @@ def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article,
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
 sess = tf.Session()
-tokenizer = create_tokenizer_from_hub_module(sess)
-vocabulary_size = len(tokenizer.vocab)  # <T>
 
+tokenizer = create_tokenizer_from_hub_module(sess)
+vocabulary_size = len(tokenizer.vocab)  # special end token <T>
 titles, summaries, articles = read_data()
 dataset_size = len(titles)
-article_tokens, max_length_article = tokenize_samples(tokenizer, articles)
-summary_tokens, max_length_summary = tokenize_samples(tokenizer, summaries)
+train = int(round(dataset_size * 0.8))
+test = int(round(dataset_size * 0.2))
+
+print("Dataset size all/train/test: ", dataset_size, train, test)
+print("Vocabulary size: ", vocabulary_size)
+
+article_tokens, max_len_article, min_len_article, avg_len_article = tokenize_samples(tokenizer, articles, titles)
+summary_tokens, max_len_summary, min_len_summary, avg_len_summary = tokenize_samples(tokenizer, summaries, titles)
+
+print("Article tokens max/avg/min length: ", max_len_article, avg_len_article, min_len_article)
+print("Summary tokens max/avg/min length: ", max_len_summary, avg_len_summary, min_len_summary)
 
 article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens)
 summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens)
 target_input_ids, target_masks, target_segment_ids = create_targets(
     summary_input_ids, summary_input_masks, summary_segment_ids)
 
-train = int(round(dataset_size * 0.8))
-test = int(round(dataset_size * 0.2))
+pad_len_article = len(max(article_input_ids, key=len))
+pad_len_summary = len(max(summary_input_ids, key=len))
+
+print("Padded article/summary tokens max length: ", pad_len_article, pad_len_summary)
 
 train_data_article = (article_input_ids[:train], article_input_masks[:train], article_segment_ids[:train])
 train_data_summary = (summary_input_ids[:train], summary_input_masks[:train], summary_segment_ids[:train])
@@ -378,7 +392,8 @@ epochs = 12
 
 # training
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
-                                                    train_data_article, train_data_summary, train_data_target)
+                                                    train_data_article, train_data_summary, train_data_target,
+                                                    pad_len_article, pad_len_summary)
 
 # testing
-evaluate(encoder_model, decoder_model, titles[-test:], summary_tokens[-test:], test_data_article, max_length_summary)
+evaluate(encoder_model, decoder_model, titles[-test:], summary_tokens[-test:], test_data_article, max_len_summary)
