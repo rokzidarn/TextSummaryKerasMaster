@@ -201,37 +201,44 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target, pad_len_article, pad_len_summary):
+def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target, max_segments_article, max_segments_summary):
     (article_input_ids, article_input_masks, article_segment_ids) = train_data_article
     (summary_input_ids, summary_input_masks, summary_segment_ids) = train_data_summary
     (target_input_ids, target_masks, target_segment_ids) = train_data_target
 
     # encoder
-    enc_in_id = Input(shape=(None, ))
-    enc_in_mask = Input(shape=(None, ))
-    enc_in_segment = Input(shape=(None, ))
+    enc_in_id = Input(shape=(None, ), name="Encoder-Input-Ids")
+    enc_in_mask = Input(shape=(None, ), name="Encoder-Input-Masks")
+    enc_in_segment = Input(shape=(None, ), name="Encoder-Input-Segment-Ids")
     bert_encoder_inputs = [enc_in_id, enc_in_mask, enc_in_segment]
 
-    encoder_embeddings = BertLayer()(bert_encoder_inputs)
-    encoder_lstm = LSTM(latent_size, return_state=True)
+    encoder_embeddings = BertLayer(name='Encoder-Bert-Layer')(bert_encoder_inputs)
+    encoder_lstm = LSTM(latent_size, return_state=True, name='Encoder-LSTM')
     encoder_out, e_state_h, e_state_c = encoder_lstm(encoder_embeddings)
     encoder_states = [e_state_h, e_state_c]
 
     # decoder
-    dec_in_id = Input(shape=(None,), name="Decoder-Input-ids")
+    dec_in_id = Input(shape=(None,), name="Decoder-Input-Ids")
     dec_in_mask = Input(shape=(None,), name="Decoder-Input-Masks")
-    dec_in_segment = Input(shape=(None,), name="Decoder-Input-Segment-ids")
+    dec_in_segment = Input(shape=(None,), name="Decoder-Input-Segment-Ids")
     bert_decoder_inputs = [dec_in_id, dec_in_mask, dec_in_segment]
 
-    decoder_embeddings_layer = BertLayer()
+    decoder_embeddings_layer = BertLayer(name='Decoder-Bert-Layer')
     decoder_embeddings = decoder_embeddings_layer(bert_decoder_inputs)
-    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True)
+    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     decoder_out, _, _ = decoder_lstm(decoder_embeddings, initial_state=encoder_states)
-    decoder_dense = Dense(vocabulary_size, activation='softmax', name='Final-Output-Dense')
-    decoder_outputs = decoder_dense(decoder_out)
+
+    decoder_dense_id = Dense(vocabulary_size, activation='softmax', name='Dense-Id')
+    decoder_dense_mask = Dense(2, activation='softmax', name='Dense-Mask')
+    decoder_dense_segment = Dense(max_segments_summary, activation='softmax', name='Dense-Segment')
+
+    dec_outputs_id = decoder_dense_id(decoder_out)
+    dec_outputs_mask = decoder_dense_mask(decoder_out)
+    dec_outputs_segment = decoder_dense_segment(decoder_out)
 
     seq2seq_model = Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
-                                  dec_in_id, dec_in_mask, dec_in_segment], outputs=decoder_outputs)
+                                  dec_in_id, dec_in_mask, dec_in_segment],
+                          outputs=[dec_outputs_id, dec_outputs_mask, dec_outputs_segment])
     seq2seq_model.summary()
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
@@ -239,7 +246,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     initialize_vars(sess)
     history = seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
                                  summary_input_ids, summary_input_masks, summary_segment_ids],
-                                numpy.expand_dims(target_input_ids, -1), epochs=epochs, batch_size=batch_size)
+                                [numpy.expand_dims(target_input_ids, -1), numpy.expand_dims(target_masks, -1), numpy.expand_dims(target_segment_ids, -1)],
+                                epochs=epochs, batch_size=batch_size)
 
     f = open("data/models/bert_results.txt", "w", encoding="utf-8")
     f.write("BERT \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: 768 \n")
@@ -252,17 +260,20 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     # inference
     encoder_model = Model(bert_encoder_inputs, encoder_states)
 
-    decoder_state_input_h = Input(shape=(latent_size,))
-    decoder_state_input_c = Input(shape=(latent_size,))
+    decoder_state_input_h = Input(shape=(latent_size,), name='Hidden-State-H')
+    decoder_state_input_c = Input(shape=(latent_size,), name='Hidden-State-C')
     decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
     decoder_embeddings_inf = decoder_embeddings_layer(bert_decoder_inputs)
 
     decoder_outputs_inf, state_h_inf, state_c_inf = decoder_lstm(decoder_embeddings_inf, initial_state=decoder_states_inputs)
     decoder_states_inf = [state_h_inf, state_c_inf]
-    decoder_outputs_inf = decoder_dense(decoder_outputs_inf)
 
-    decoder_model = Model(inputs=bert_decoder_inputs + decoder_states_inputs, outputs=[decoder_outputs_inf] + decoder_states_inf)
-    # TODO
+    decoder_outputs_id_inf = decoder_dense_id(decoder_outputs_inf)
+    decoder_outputs_mask_inf = decoder_dense_mask(decoder_outputs_inf)
+    decoder_outputs_segment_inf = decoder_dense_segment(decoder_outputs_inf)
+
+    decoder_model = Model(inputs=bert_decoder_inputs + decoder_states_inputs,
+                          outputs=[decoder_outputs_id_inf] + [decoder_outputs_mask_inf] + [decoder_outputs_segment_inf] + decoder_states_inf)
 
     return encoder_model, decoder_model
 
@@ -272,7 +283,6 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
     it = 1
 
-    # target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
     target_input = np.zeros((1, 1))
     target_input[0][0] = tokenizer.convert_tokens_to_ids(["[CLS]"])[0]
     target_mask = np.zeros((1, 1))
@@ -284,7 +294,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
     stop_condition = False
 
     while not stop_condition:
-        candidates, h, c = decoder_model.predict([target_input, target_mask, target_segment] + states_value)
+        candidates, masks, segments, h, c = decoder_model.predict([target_input, target_mask, target_segment] + states_value)
 
         predicted_word_index = numpy.argmax(candidates[0, -1, :])
         # predicted_word_index = numpy.argsort(candidates)[-1]  # same as argmax
@@ -298,13 +308,13 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
         target_input[0][0] = predicted_word_index
 
         target_mask = np.zeros((1, 1))
-        target_mask[0][0] = 1
+        target_mask[0][0] = numpy.argmax(masks[0, -1, :])
 
         if predicted_word == "." or predicted_word == "!" or predicted_word == "?":
             it += 1
 
         target_segment = np.zeros((1, 1))
-        target_segment[0][0] = it
+        target_segment[0][0] = numpy.argmax(segments[0, -1, :])
 
         states_value = [h, c]
 
@@ -382,6 +392,8 @@ target_input_ids, target_masks, target_segment_ids = create_targets(
 
 pad_len_article = len(max(article_input_ids, key=len))
 pad_len_summary = len(max(summary_input_ids, key=len))
+max_segments_article = max([max(x) for x in article_segment_ids]) + 1
+max_segments_summary = max([max(x) for x in summary_segment_ids]) + 1
 
 print("Padded article/summary tokens max length: ", pad_len_article, pad_len_summary)
 
@@ -391,14 +403,14 @@ train_data_target = (target_input_ids[:train], target_masks[:train], target_segm
 
 test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
-latent_size = 128
+latent_size = 1280
 batch_size = 1
-epochs = 1
+epochs = 24
 
 # training
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
                                                     train_data_article, train_data_summary, train_data_target,
-                                                    pad_len_article, pad_len_summary)
+                                                    max_segments_article, max_segments_summary)
 
 # testing
 evaluate(encoder_model, decoder_model, titles[-test:], summary_tokens[-test:], test_data_article, max_len_summary)
