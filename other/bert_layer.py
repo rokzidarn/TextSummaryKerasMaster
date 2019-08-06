@@ -5,13 +5,13 @@ import tensorflow_hub as hub
 class BertLayer(tf.layers.Layer):
     def __init__(
         self,
-        n_fine_tune_layers=0,
+        n_fine_tune_layers=10,
         pooling="mean",
         bert_path="https://tfhub.dev/google/bert_multi_cased_L-12_H-768_A-12/1",
         **kwargs,
     ):
         self.n_fine_tune_layers = n_fine_tune_layers
-        self.trainable = False
+        self.trainable = True
         self.output_size = 768
         self.pooling = pooling
         self.bert_path = bert_path
@@ -85,7 +85,7 @@ class BertLayer(tf.layers.Layer):
             masked_reduce_mean = lambda x, m: tf.reduce_sum(mul_mask(x, m), axis=1) / (
                     tf.reduce_sum(m, axis=1, keepdims=True) + 1e-10)
             input_mask = tf.cast(input_mask, tf.float32)
-            pooled = masked_reduce_mean(result, input_mask)  # TODO
+            pooled = masked_reduce_mean(result, input_mask)
         else:
             raise NameError(f"Undefined pooling type (must be either first or mean, but is {self.pooling}")
 
