@@ -115,7 +115,8 @@ def tokenize_samples(tokenizer, samples, titles):
 
     for i in range(len(samples)):
         tokens = tokenizer.tokenize(samples[i])
-        tokens.append("<T>")  # special end token
+        tokens.append("[SEP]")
+        tokens = ["[CLS]"] + tokens
         words.append(tokens)
         # print(titles[i], len(tokens))
 
@@ -126,54 +127,29 @@ def tokenize_samples(tokenizer, samples, titles):
     return words, max_len, min_len, avg_len
 
 
-def convert_sample(tokenizer, words):
-    it = 1
-    tokens = []
-    segment_ids = []
-    tokens.append("[CLS]")  # 101: sentence start token
-    segment_ids.append(it)
-
-    for token in words:
-        tokens.append(token)
-        segment_ids.append(it)
-        if token == "." or token == "!" or token == "?":  # check segments (sentence splitting), first sentence == 1
-            tokens.append("[SEP]")  # 102: sentence end token
-            segment_ids.append(it)
-            it += 1
-
-    segment_ids[-1] = segment_ids[-1] - 1  # fix special end token
-
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-    # the mask has 1 for real tokens and 0 for padding tokens, only real tokens are attended to
+def convert_sample(tokenizer, words, max_len):
+    input_ids = tokenizer.convert_tokens_to_ids(words)
+    segment_ids = [0] * len(input_ids)
     input_masks = [1] * len(input_ids)
+
+    while len(input_ids) < max_len:
+        input_ids.append(0)
+        input_masks.append(0)
+        segment_ids.append(0)
 
     return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
 
 
-def vectorize_features(tokenizer, samples):
+def vectorize_features(tokenizer, samples, max_len):
     t_input_ids, t_input_masks, t_segment_ids = [], [], []
-    input_ids, input_masks, segment_ids = [], [], []
 
     for sample in samples:
-        t_input_id, t_input_mask, t_segment_id = convert_sample(tokenizer, sample)
+        t_input_id, t_input_mask, t_segment_id = convert_sample(tokenizer, sample, max_len)
         t_input_ids.append(t_input_id)
         t_input_masks.append(t_input_mask)
         t_segment_ids.append(t_segment_id)
 
-    max_pad_seq_length = len(max(t_segment_ids, key=len))
-
-    for i in range(len(samples)):
-        t_id = t_input_ids[i]
-        t_mask = t_input_masks[i]
-        t_segment = t_segment_ids[i]
-
-        zeros = np.zeros(max_pad_seq_length - len(t_id), dtype=int)
-        input_ids.append(np.concatenate((t_id, zeros)))
-        input_masks.append(np.concatenate((t_mask, zeros)))
-        segment_ids.append(np.concatenate((t_segment, zeros)))
-
-    return np.array(input_ids), np.array(input_masks), np.array(segment_ids)
+    return np.array(t_input_ids), np.array(t_input_masks), np.array(t_segment_ids)
 
 
 def create_targets(summary_input_ids, summary_input_masks, summary_segment_ids):  # ahead by one timestep
@@ -201,7 +177,7 @@ def initialize_vars(sess):
     tf.keras.backend.set_session(sess)
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target, pad_len_article, pad_len_summary):
+def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess, train_data_article, train_data_summary, train_data_target):
     (article_input_ids, article_input_masks, article_segment_ids) = train_data_article
     (summary_input_ids, summary_input_masks, summary_segment_ids) = train_data_summary
     (target_input_ids, target_masks, target_segment_ids) = train_data_target
@@ -274,12 +250,11 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
 def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer):
     input_ids, input_masks, segment_ids = inputs
     states_value = encoder_model.predict([input_ids, input_masks, segment_ids])
-    it = 1
 
     # target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])).reshape(1, 1)
     target_input = numpy.array(tokenizer.convert_tokens_to_ids(["[CLS]"])[0]).reshape(1, 1)
     target_mask = numpy.array(1).reshape(1, 1)
-    target_segment = numpy.array(it).reshape(1, 1)
+    target_segment = numpy.array(0).reshape(1, 1)
 
     prediction = []
     stop_condition = False
@@ -292,16 +267,11 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
-        if (predicted_word == "<T>") or (len(prediction) > max_length_summary):
+        if (predicted_word == "[SEP]") or (predicted_word == "[PAD]") or (len(prediction) > max_length_summary):
             stop_condition = True
 
         states_value = state
         target_input = numpy.array(predicted_word_index).reshape(1, 1)
-        target_mask = numpy.array(1).reshape(1, 1)
-
-        if predicted_word == "." or predicted_word == "!" or predicted_word == "?":
-            it += 1
-        target_segment = numpy.array(it).reshape(1, 1)
 
     return prediction[:-1]
 
@@ -370,15 +340,10 @@ summary_tokens, max_len_summary, min_len_summary, avg_len_summary = tokenize_sam
 print("Article tokens max/avg/min length: ", max_len_article, avg_len_article, min_len_article)
 print("Summary tokens max/avg/min length: ", max_len_summary, avg_len_summary, min_len_summary)
 
-article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens)
-summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens)
+article_input_ids, article_input_masks, article_segment_ids = vectorize_features(tokenizer, article_tokens, max_len_article)
+summary_input_ids, summary_input_masks, summary_segment_ids = vectorize_features(tokenizer, summary_tokens, max_len_summary)
 target_input_ids, target_masks, target_segment_ids = create_targets(
     summary_input_ids, summary_input_masks, summary_segment_ids)
-
-pad_len_article = len(max(article_input_ids, key=len))
-pad_len_summary = len(max(summary_input_ids, key=len))
-
-print("Padded article/summary tokens max length: ", pad_len_article, pad_len_summary)
 
 train_data_article = (article_input_ids[:train], article_input_masks[:train], article_segment_ids[:train])
 train_data_summary = (summary_input_ids[:train], summary_input_masks[:train], summary_segment_ids[:train])
@@ -386,14 +351,13 @@ train_data_target = (target_input_ids[:train], target_masks[:train], target_segm
 
 test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
-latent_size = 256
+latent_size = 768
 batch_size = 1
 epochs = 12
 
 # training
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
-                                                    train_data_article, train_data_summary, train_data_target,
-                                                    pad_len_article, pad_len_summary)
+                                                    train_data_article, train_data_summary, train_data_target)
 
 # testing
 evaluate(encoder_model, decoder_model, titles[-test:], summary_tokens[-test:], test_data_article, max_len_summary)
