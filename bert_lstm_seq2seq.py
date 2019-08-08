@@ -17,7 +17,7 @@ class BertLayer(tf.layers.Layer):
     def __init__(self, n_fine_tune_layers=10, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
-        self.output_size = 256
+        self.output_size = 768
         super(BertLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -207,8 +207,10 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
 
     decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
     decoder_out, _, _ = decoder_lstm(decoder_batchnorm, initial_state=encoder_states)
+    dense_batchnorm_layer = BatchNormalization(name='Decoder-Batch-Normalization-2')
+    decoder_out_batchnorm = dense_batchnorm_layer(decoder_out)
     decoder_dense_id = Dense(vocabulary_size, activation='softmax', name='Dense-Id')
-    dec_outputs_id = decoder_dense_id(decoder_out)
+    dec_outputs_id = decoder_dense_id(decoder_out_batchnorm)
 
     seq2seq_model = Model(inputs=[enc_in_id, enc_in_mask, enc_in_segment,
                                   dec_in_id, dec_in_mask, dec_in_segment],
@@ -241,8 +243,9 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     decoder_batchnorm_inf = decoder_batchnorm_layer(decoder_embeddings_inf)
 
     decoder_outputs_inf, state_h_inf, state_c_inf = decoder_lstm(decoder_batchnorm_inf, initial_state=decoder_states_inputs)
+    decoder_out_batchnorm_inf = dense_batchnorm_layer(decoder_outputs_inf)
     decoder_states_inf = [state_h_inf, state_c_inf]
-    decoder_outputs_id_inf = decoder_dense_id(decoder_outputs_inf)
+    decoder_outputs_id_inf = decoder_dense_id(decoder_out_batchnorm_inf)
 
     decoder_model = Model(inputs=bert_decoder_inputs + decoder_states_inputs,
                           outputs=[decoder_outputs_id_inf] + decoder_states_inf)
@@ -358,7 +361,7 @@ train_data_target = (target_input_ids[:train], target_masks[:train], target_segm
 
 test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
-latent_size = 768
+latent_size = 256
 batch_size = 1
 epochs = 12
 
