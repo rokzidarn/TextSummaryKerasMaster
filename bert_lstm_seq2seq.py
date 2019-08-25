@@ -13,7 +13,7 @@ from tensorflow.python.keras.models import Model
 # from keras.layers import Input, GRU, Dense, BatchNormalization
 
 
-class BertLayer(tf.layers.Layer):
+class BertLayer(tf.keras.layers.Layer):
     def __init__(self, n_fine_tune_layers=10, **kwargs):
         self.n_fine_tune_layers = n_fine_tune_layers
         self.trainable = True
@@ -62,7 +62,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/bert/'
+    ddir = 'data/small/'
 
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
@@ -115,6 +115,7 @@ def tokenize_samples(tokenizer, samples, titles):
 
     for i in range(len(samples)):
         tokens = tokenizer.tokenize(samples[i])
+        tokens = tokens[:510]
         tokens.append("[SEP]")
         tokens = ["[CLS]"] + tokens
         words.append(tokens)
@@ -223,7 +224,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
     history = seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
                                  summary_input_ids, summary_input_masks, summary_segment_ids],
                                 numpy.expand_dims(target_input_ids, -1),
-                                epochs=epochs, batch_size=batch_size)
+                                epochs=epochs, batch_size=batch_size, validation_split=0.1)
 
     f = open("data/models/bert_results.txt", "w", encoding="utf-8")
     f.write("BERT \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: 768 \n")
@@ -299,9 +300,9 @@ def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article,
         inputs = article_input_ids[i:i+1], article_input_masks[i:i+1], article_segment_ids[i:i+1]
         prediction = predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, tokenizer)
         predictions.append(prediction)
-        print(prediction)
+        # print(prediction)
 
-        f = open("data/bert/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
+        f = open("data/small/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
         f.write(' '.join(prediction))
         f.close()
 
@@ -338,8 +339,8 @@ tokenizer = create_tokenizer_from_hub_module(sess)
 vocabulary_size = len(tokenizer.vocab)  # special end token <T>
 titles, summaries, articles = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.8))
-test = int(round(dataset_size * 0.2))
+train = int(round(dataset_size * 0.9))
+test = int(round(dataset_size * 0.1))
 
 print("Dataset size all/train/test: ", dataset_size, train, test)
 print("Vocabulary size: ", vocabulary_size)
@@ -362,7 +363,7 @@ train_data_target = (target_input_ids[:train], target_masks[:train], target_segm
 test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
 latent_size = 256
-batch_size = 1
+batch_size = 32
 epochs = 12
 
 # training

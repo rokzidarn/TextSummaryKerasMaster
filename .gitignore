@@ -3,3 +3,4 @@ cnn/
 nn/
 models/
 __pycache__/
+.idea/
