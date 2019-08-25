@@ -7,54 +7,110 @@ import tensorflow_hub as hub
 import numpy as np
 from bert.tokenization import FullTokenizer
 import rouge
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.layers import Layer
+from tensorflow.python.keras.callbacks import EarlyStopping
 from tensorflow.python.keras.layers import Input, LSTM, Dense, BatchNormalization
 from tensorflow.python.keras.models import Model
 # from keras.models import Model
 # from keras.layers import Input, GRU, Dense, BatchNormalization
 
 
-class BertLayer(tf.keras.layers.Layer):
-    def __init__(self, n_fine_tune_layers=10, **kwargs):
+class BertLayer(Layer):
+    '''
+    pooled_output: the first CLS token after adding projection layer () with shape [batch_size, 768].
+    sequence_output: all tokens output with shape [batch_size, max_length, 768].
+    mean_pooling: mean pooling of all tokens output [batch_size, max_length, 768].
+    '''
+
+    def __init__(self, n_fine_tune_layers=10, tf_hub='https://tfhub.dev/google/bert_multi_cased_L-12_H-768_A-12/1',
+                 output_representation='sequence_output', trainable=False, **kwargs):
+
         self.n_fine_tune_layers = n_fine_tune_layers
-        self.trainable = True
+        self.is_trainble = trainable
         self.output_size = 768
+        self.tf_hub = tf_hub
+        self.output_representation = output_representation
+        self.supports_masking = True
+
         super(BertLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
+
         self.bert = hub.Module(
-            "https://tfhub.dev/google/bert_multi_cased_L-12_H-768_A-12/1",
-            trainable=self.trainable,
+            self.tf_hub,
+            trainable=self.is_trainble,
             name="{}_module".format(self.name)
         )
 
-        trainable_vars = self.bert.variables
-        # trainable_vars = [var for var in trainable_vars if not "/cls/" in var.name]
-        trainable_vars = [var for var in trainable_vars if not "/cls/" in var.name and not "/pooler/" in var.name]
-        trainable_vars = trainable_vars[-self.n_fine_tune_layers:]
+        variables = list(self.bert.variable_map.values())
+        if self.is_trainble:
+            # 1 first remove unused layers
+            trainable_vars = [var for var in variables if not "/cls/" in var.name]
 
-        # Add to trainable weights
-        for var in trainable_vars:
-            self._trainable_weights.append(var)
+            if self.output_representation == "sequence_output" or self.output_representation == "mean_pooling":
+                # 1 first remove unused pooled layers
+                trainable_vars = [var for var in trainable_vars if not "/pooler/" in var.name]
 
-        for var in self.bert.variables:
-            if var not in self._trainable_weights:
+            # Select how many layers to fine tune
+            trainable_vars = trainable_vars[-self.n_fine_tune_layers:]
+
+            # Add to trainable weights
+            for var in trainable_vars:
+                self._trainable_weights.append(var)
+
+            # Add non-trainable weights
+            for var in self.bert.variables:
+                if var not in self._trainable_weights:
+                    self._non_trainable_weights.append(var)
+
+        else:
+            for var in variables:
                 self._non_trainable_weights.append(var)
 
         super(BertLayer, self).build(input_shape)
 
     def call(self, inputs):
-        inputs = [tf.keras.backend.cast(x, dtype="int32") for x in inputs]
+        inputs = [K.cast(x, dtype="int32") for x in inputs]
         input_ids, input_mask, segment_ids = inputs
         bert_inputs = dict(
             input_ids=input_ids, input_mask=input_mask, segment_ids=segment_ids
         )
-        result = self.bert(inputs=bert_inputs, signature="tokens", as_dict=True)[
-            "sequence_output"
-        ]
-        return result
+        result = self.bert(inputs=bert_inputs, signature="tokens", as_dict=True)
+
+        if self.output_representation == "pooled_output":
+            pooled = result["pooled_output"]
+
+        elif self.output_representation == "mean_pooling":
+            result_tmp = result["sequence_output"]
+
+            mul_mask = lambda x, m: x * tf.expand_dims(m, axis=-1)
+            masked_reduce_mean = lambda x, m: tf.reduce_sum(mul_mask(x, m), axis=1) / (
+                    tf.reduce_sum(m, axis=1, keepdims=True) + 1e-10)
+            input_mask = tf.cast(input_mask, tf.float32)
+            pooled = masked_reduce_mean(result_tmp, input_mask)
+
+        elif self.output_representation == "sequence_output":
+
+            pooled = result["sequence_output"]
+
+        return pooled
+
+    def compute_mask(self, inputs, mask=None):
+
+        if self.output_representation == 'sequence_output':
+            inputs = [K.cast(x, dtype="bool") for x in inputs]
+            mask = inputs[1]
+
+            return mask
+        else:
+            return None
 
     def compute_output_shape(self, input_shape):
-        return input_shape[0], self.output_size
+        if self.output_representation == "sequence_output":
+            return (input_shape[0][0], input_shape[0][1], self.output_size)
+        else:
+            return (input_shape[0][0], self.output_size)
 
 
 def read_data():
@@ -62,7 +118,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/small/'
+    ddir = 'data/news/'
 
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
@@ -84,8 +140,10 @@ def read_data():
     return titles, summaries, articles
 
 
-def plot_training(history_dict, epochs):
+def plot_training(history_dict):
     loss = history_dict['loss']
+    val_loss = history_dict['val_loss']
+    epochs = list(range(1, len(loss)+1))
 
     fig = plt.figure()
     plt.plot(epochs, loss, 'r')
@@ -93,8 +151,15 @@ def plot_training(history_dict, epochs):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    # plt.show()
-    fig.savefig('data/models/bert_seq2seq.png')
+    fig.savefig('data/models/bert_seq2seq_train.png')
+
+    fig = plt.figure()
+    plt.plot(epochs, val_loss, 'r')
+    plt.title('Validation loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    fig.savefig('data/models/bert_seq2seq_validation.png')
 
 
 def create_tokenizer_from_hub_module(sess):
@@ -221,18 +286,18 @@ def seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
                           metrics=['sparse_categorical_accuracy'])
 
     initialize_vars(sess)
+    e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min')  # TODO: restore_best_weights=True
     history = seq2seq_model.fit([article_input_ids, article_input_masks, article_segment_ids,
                                  summary_input_ids, summary_input_masks, summary_segment_ids],
                                 numpy.expand_dims(target_input_ids, -1),
-                                epochs=epochs, batch_size=batch_size, validation_split=0.1)
+                                epochs=epochs, batch_size=batch_size, validation_split=0.1, callbacks=[e_stopping])
 
     f = open("data/models/bert_results.txt", "w", encoding="utf-8")
     f.write("BERT \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: 768 \n")
     f.close()
 
     history_dict = history.history
-    graph_epochs = range(1, epochs + 1)
-    plot_training(history_dict, graph_epochs)
+    plot_training(history_dict)
 
     # inference
     encoder_model = Model(bert_encoder_inputs, encoder_states)
@@ -267,12 +332,13 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
 
     prediction = []
     stop_condition = False
+    previous = ''
 
     while not stop_condition:
         candidates, h, c = decoder_model.predict([target_input, target_mask, target_segment] + states_value)
 
         predicted_word_index = numpy.argmax(candidates[0, -1, :])
-        # predicted_word_index = numpy.argsort(candidates)[-1]  # same as argmax
+        # predicted_word_index = numpy.argsort(candidates)[-1]  # TODO: second candidate to resolve repetition
         predicted_word = tokenizer.convert_ids_to_tokens([predicted_word_index])[0]
         prediction.append(predicted_word)
 
@@ -283,6 +349,7 @@ def predict_sequence(encoder_model, decoder_model, inputs, max_length_summary, t
         target_input[0][0] = predicted_word_index
 
         states_value = [h, c]
+        previous = predicted_word
 
     return prediction[:-1]
 
@@ -302,15 +369,15 @@ def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article,
         predictions.append(prediction)
         # print(prediction)
 
-        f = open("data/small/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
+        f = open("data/news/predictions/" + titles[i] + ".txt", "w", encoding="utf-8")
         f.write(' '.join(prediction))
         f.close()
 
     # evaluation using ROUGE
-    evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
-                            max_n=3,
+    evaluator = rouge.Rouge(metrics=['rouge-l'],
+                            max_n=2,
                             limit_length=True,
-                            length_limit=100,
+                            length_limit=150,
                             length_limit_type='words',
                             apply_avg=False,
                             apply_best=True,
@@ -332,15 +399,15 @@ def evaluate(encoder_model, decoder_model, titles, summaries, test_data_article,
 
 # MAIN
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
+# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # CPU
 sess = tf.Session()
 
 tokenizer = create_tokenizer_from_hub_module(sess)
 vocabulary_size = len(tokenizer.vocab)  # special end token <T>
 titles, summaries, articles = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.9))
-test = int(round(dataset_size * 0.1))
+train = int(round(dataset_size * 0.95))
+test = int(round(dataset_size * 0.05))
 
 print("Dataset size all/train/test: ", dataset_size, train, test)
 print("Vocabulary size: ", vocabulary_size)
@@ -362,9 +429,9 @@ train_data_target = (target_input_ids[:train], target_masks[:train], target_segm
 
 test_data_article = (article_input_ids[-test:], article_input_masks[-test:], article_segment_ids[-test:])
 
-latent_size = 256
-batch_size = 32
-epochs = 12
+latent_size = 384
+batch_size = 12
+epochs = 16
 
 # training
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, batch_size, epochs, sess,
