@@ -2,6 +2,8 @@ import warnings
 import os
 import codecs
 import re
+import matplotlib.mlab as mlab
+import matplotlib.pyplot as plt
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import nltk
 from bert.tokenization import FullTokenizer
@@ -39,90 +41,100 @@ def clean(text):
 
 # MAIN
 
-datapath = '../data/clarin/DNEVNIK'
-data = os.listdir(datapath)
+datapaths = ['../data/clarin/DNEVNIK', '../data/clarin/ZURNAL24', '../data/clarin/24UR', '../data/clarin/FINANCE']
+article_len = []
+summary_len = []
+i = 0
 
 # sess = tf.Session()
 # tokenizer = create_tokenizer_from_hub_module(sess)
 
-i = 0
-article_len = []
-summary_len = []
+for datapath in datapaths:
+    data = os.listdir(datapath)
+    for file in data:
+        i += 1
+        filepath = datapath + '/' + file
 
-for file in data:
-    i += 1
-    filepath = datapath + '/' + file
+        try:
+            with open(filepath) as fp:
+                name = os.path.splitext(os.path.basename(fp.name))[0]
 
-    try:
-        with open(filepath) as fp:
-            name = os.path.splitext(os.path.basename(fp.name))[0]
+                arr = []
+                next = True
+                while next:
+                    line = fp.readline()
+                    if line.startswith('# Summary:'):
+                        next = False
 
-            arr = []
-            next = True
-            while next:
-                line = fp.readline()
-                if line.startswith('# Summary:'):
-                    next = False
+                summary = fp.readline()
+                summary = summary.replace("è", "č").replace("È", "Č").replace('æ', 'č')
+                if len(summary) < 2:
+                    continue
 
-            summary = fp.readline()
-            summary = summary.replace("è", "č").replace("È", "Č").replace('æ', 'č')
-            if len(summary) < 2:
-                continue
-            else:
-                tmp = summary.split(' ')
-                tmp.pop(0)  # TODO
-                summary = ' '.join(tmp)
+                if datapath == '../data/clarin/DNEVNIK':
+                    tmp = summary.split(' ')
+                    tmp.pop(0)
+                    summary = ' '.join(tmp)
 
-            fp.readline()
+                fp.readline()
 
-            line = fp.readline()
-            arr.append(line)
-            while line:
                 line = fp.readline()
                 arr.append(line)
+                while line:
+                    line = fp.readline()
+                    arr.append(line)
 
-            if len(arr) > 1 and arr[0].find('(Foto:') != -1:
-                arr.pop(0)
+                if len(arr) > 1 and arr[0].find('(Foto:') != -1:
+                    arr.pop(0)
 
-            if len(arr) > 2 and '@' in arr[-2]:
-                arr.pop(-2)
+                if len(arr) > 2 and '@' in arr[-2]:
+                    arr.pop(-2)
 
-            article = ''.join(arr)
-            article = article.replace("è", "č").replace("È", "Č").replace('æ', 'č')
+                article = ''.join(arr)
+                article = article.replace("è", "č").replace("È", "Č").replace('æ', 'č')
 
-            # print(summary, '\n', article)
-            # article_tokens = tokenizer.tokenize(article)
-            # summary_tokens = tokenizer.tokenize(summary)
-            # article_token_len = len(article_tokens)
-            # summary_token_len = len(summary_tokens)
+                # print(summary, '\n', article)
+                # article_tokens = tokenizer.tokenize(article)
+                # summary_tokens = tokenizer.tokenize(summary)
+                # article_token_len = len(article_tokens)
+                # summary_token_len = len(summary_tokens)
 
-            article_words_len = len(clean(article))
-            summary_words_len = len(clean(summary))
-            article_len.append(article_words_len)
-            summary_len.append(summary_words_len)
+                article_words_len = len(clean(article))
+                summary_words_len = len(clean(summary))
+                article_len.append(article_words_len)
+                summary_len.append(summary_words_len)
 
-            print(i, article_words_len, summary_words_len)
+                print(i, article_words_len, summary_words_len)
 
-            if article_words_len >= 150 and article_words_len <= 300 and summary_words_len >= 20 and summary_words_len <= 40:
-                try:
-                    with codecs.open('../data/tmp/articles/'+name+'.txt', 'w', encoding='utf8') as f:
-                        f.write("{}\n".format(article))
-                    with codecs.open('../data/tmp/summaries/'+name+'.txt', 'w', encoding='utf8') as f:
-                        f.write("{}\n".format(summary))
-                except:
-                    continue
-    except:
-        continue
+                """
+    
+                if article_words_len >= 150 and article_words_len <= 300 and summary_words_len >= 20 and summary_words_len <= 40:
+                    try:
+                        with codecs.open('../data/tmp/articles/'+name+'.txt', 'w', encoding='utf8') as f:
+                            f.write("{}\n".format(article))
+                        with codecs.open('../data/tmp/summaries/'+name+'.txt', 'w', encoding='utf8') as f:
+                            f.write("{}\n".format(summary))
+                    except:
+                        continue
+                        
+                """
+        except:
+            continue
 
-
-print(sum(article_len)/i)
-print(sum(summary_len)/i)
 
 tmp = zip(article_len, summary_len)
-filtered = list(filter(lambda x: x[0] >= 100 and x[0] <= 300 and x[1] >= 10 and x[1] <= 60, tmp))
+filtered = list(filter(lambda x: x[0] >= 80 and x[0] <= 420 and x[1] >= 10 and x[1] <= 110, tmp))
 size = len(filtered)
-print(size)
-
 unzipped = [list(t) for t in zip(*filtered)]
+
+print(size)
 print(sum(unzipped[0])/size)
 print(sum(unzipped[1])/size)
+
+n, bins, patches = plt.hist(unzipped[0], 34, facecolor='blue', alpha=0.5)
+print(n, bins, patches)
+plt.show()
+
+# n, bins, patches = plt.hist(unzipped[1], 10, facecolor='blue', alpha=0.5)
+# print(n, bins, patches)
+# plt.show()

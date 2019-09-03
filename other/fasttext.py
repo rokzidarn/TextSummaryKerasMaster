@@ -34,7 +34,7 @@ def class_weights():
 
 
 def load_embeddings():
-    fin = io.open('../data/fasttext/wiki-news-300d-1M.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
+    fin = io.open('../data/fasttext/cc.sl.300.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
     n, d = map(int, fin.readline().split())
     embeddings_index = {}
     words = []
@@ -58,6 +58,8 @@ data = ['I love machine learning',
 
 labels = ['positive', 'negative', 'negative', 'positive', 'positive']
 
+print([[0, 1, 1, 3, 2, 4], [1, 1, 2, 4, 0, 0]] + [[0, 1, 1, 3, 2, 4], [1, 1, 2, 4, 0, 0]]);exit()
+
 text = [re.sub(r'([^\s\w]|_)+', '', sentence) for sentence in data]
 text = [sentence.lower().split() for sentence in text]
 words = set([item for sublist in text for item in sublist])
@@ -76,7 +78,11 @@ y = pd.get_dummies(labels)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=False)
 
 embeddings_index, n, d, words = load_embeddings()
-print(n,d,words[:100]);exit()
+print(n, d)
+f = open("../data/models/fasttext_dict.txt", "w", encoding='utf-8')
+for w in words:
+    f.write(w + '\n')
+f.close()
 
 embedding_matrix = np.zeros((len(word_index) + 1, 300))
 for word, i in word_index.items():
