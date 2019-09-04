@@ -127,7 +127,7 @@ def analyze_data(data, show_plot=False):
     return min_len, max_len, avg_len
 
 
-def build_vocabulary(tokens, embedding_words, write_dict=True):
+def build_vocabulary(tokens, embedding_words, write_dict=False):
     fdist = nltk.FreqDist(tokens)
     # fdist.pprint(maxlen=50)
     # fdist.plot(50)
@@ -177,20 +177,23 @@ def count_unknown(article_inputs, summary_inputs):
     return article_unk, summary_unk
 
 
-def pre_process(texts, word2idx):
+def pre_process(texts, word2idx, reverse):
     vectorized_texts = []
 
     for text in texts:  # vectorizes texts, array of tokens (words) -> array of ints (word2idx)
         text_vector = [word2idx[word] if word in word2idx else word2idx['<UNK>'] for word in text]
         text_vector.insert(0, word2idx['<START>'])  # add <START> and <END> tokens to each summary/article
         text_vector.append(word2idx['<END>'])
-        vectorized_texts.append(text_vector)
+        if reverse:
+            vectorized_texts.append(list(reversed(text_vector)))
+        else:
+            vectorized_texts.append(text_vector)
 
     return vectorized_texts
 
 
 def process_targets(summaries, word2idx):
-    tmp_inputs = pre_process(summaries, word2idx)  # same as summaries_vectors, but with delay
+    tmp_inputs = pre_process(summaries, word2idx, False)  # same as summaries_vectors, but with delay
     target_inputs = []  # ahead by one timestep, without start token
     for tmp in tmp_inputs:
         tmp.append(0)  # added 0 for padding, so the dimensions match
@@ -224,8 +227,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
-    # lst = train_article.tolist() + train_summary.tolist()
-    # classes = [item for sublist in lst for item in sublist]
+    # classes = [item for sublist in train_summary.tolist() for item in sublist]
     # class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
     e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min', restore_best_weights=True)
@@ -274,9 +276,12 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     while not stop_condition:
         candidates, state_h, state_c = decoder_model.predict([target_sequence, states_value_h, states_value_c])
 
-        predicted_word_index = np.argmax(candidates)  # greedy search
-        # predicted_word_index = numpy.argsort(candidates)[-1]
-        predicted_word = idx2word[predicted_word_index]
+        predicted_word_index = np.argmax(candidates)  # predicted_word_index = numpy.argsort(candidates)[-1]
+        if predicted_word_index == 0:
+            predicted_word = '<END>'
+        else:
+            predicted_word = idx2word[predicted_word_index]
+
         prediction.append(predicted_word)
 
         if (predicted_word == '<END>') or (len(prediction) > max_len):
@@ -298,8 +303,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
         predictions.append(prediction)
 
-        print(summaries_test[index:index+1])
-        print(prediction)
+        # print(summaries_test[index:index+1])
+        # print(prediction)
         f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")
         f.write(str(prediction))
         f.close()
@@ -331,8 +336,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.9))
-test = int(round(dataset_size * 0.1))
+train = int(round(dataset_size * 0.95))
+test = int(round(dataset_size * 0.05))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -353,8 +358,8 @@ for word, i in word2idx.items():
     if embedding_vector is not None and i > 3:
         embedding_matrix[i] = embedding_vector
 
-article_inputs = pre_process(articles, word2idx)
-summary_inputs = pre_process(summaries, word2idx)
+article_inputs = pre_process(articles, word2idx, True)
+summary_inputs = pre_process(summaries, word2idx, False)
 target_inputs = process_targets(summaries, word2idx)
 article_unk, summary_unk = count_unknown(article_inputs, summary_inputs)
 
@@ -374,8 +379,8 @@ train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
 
 latent_size = 384
-batch_size = 8
-epochs = 4
+batch_size = 16
+epochs = 18
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)
