@@ -227,13 +227,13 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
-    # classes = [item for sublist in train_summary.tolist() for item in sublist]
-    # class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
+    classes = [item for sublist in train_summary.tolist() for item in sublist]
+    class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
     e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min', restore_best_weights=True)
     history = seq2seq_model.fit(x=[train_article, train_summary], y=np.expand_dims(train_target, -1),
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
-                                callbacks=[e_stopping])  # class_weight=class_weights
+                                callbacks=[e_stopping], class_weight=class_weights)
 
     f = open("data/models/ft_results.txt", "w", encoding="utf-8")
     f.write("LSTM \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
@@ -312,7 +312,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
     evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
                             max_n=2,
                             limit_length=True,
-                            length_limit=100,
+                            length_limit=50,
                             length_limit_type='words',
                             apply_avg=False,
                             apply_best=True,
@@ -324,7 +324,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
     all_references = [' '.join(summary) for summary in summaries_test]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/ft_results.txt", "a", encoding="utf-8")
+    f = open("data/models/results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
         score = prepare_results(metric, results['p'], results['r'], results['f'])
         print(score)
@@ -380,7 +380,7 @@ test_article = article_inputs[-test:]
 
 latent_size = 384
 batch_size = 16
-epochs = 18
+epochs = 16
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)

@@ -82,7 +82,8 @@ for datapath in datapaths:
                 arr.append(line)
                 while line:
                     line = fp.readline()
-                    arr.append(line)
+                    if not line.find('Foto:') != -1:
+                        arr.append(line)
 
                 if len(arr) > 1 and arr[0].find('(Foto:') != -1:
                     arr.pop(0)
@@ -108,7 +109,7 @@ for datapath in datapaths:
 
                 """
     
-                if article_words_len >= 150 and article_words_len <= 300 and summary_words_len >= 20 and summary_words_len <= 40:
+                if article_words_len >= 150 and article_words_len <= 300 and summary_words_len >= 10 and summary_words_len <= 50:
                     try:
                         with codecs.open('../data/tmp/articles/'+name+'.txt', 'w', encoding='utf8') as f:
                             f.write("{}\n".format(article))
@@ -123,7 +124,7 @@ for datapath in datapaths:
 
 
 tmp = zip(article_len, summary_len)
-filtered = list(filter(lambda x: x[0] >= 80 and x[0] <= 420 and x[1] >= 10 and x[1] <= 110, tmp))
+filtered = list(filter(lambda x: x[0] >= 150 and x[0] <= 300 and x[1] >= 10 and x[1] <= 50, tmp))
 size = len(filtered)
 unzipped = [list(t) for t in zip(*filtered)]
 
