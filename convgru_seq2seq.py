@@ -12,7 +12,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from keras.preprocessing.sequence import pad_sequences
 from tensorflow.python.keras.callbacks import EarlyStopping
-from tensorflow.python.keras.layers import Input, LSTM, Embedding, Dense, BatchNormalization
+from tensorflow.python.keras.layers import Input, GRU, Embedding, Dense, BatchNormalization, Conv1D, MaxPooling1D, Dropout, Flatten
 from tensorflow.python.keras.models import Model
 # from keras.models import Model
 # from keras.layers import Input, LSTM, Dense, Embedding, BatchNormalization
@@ -70,7 +70,7 @@ def plot_loss(history_dict):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    fig.savefig('data/models/ft_seq2seq_train.png')
+    fig.savefig('data/models/convgru_train.png')
 
     fig = plt.figure()
     plt.plot(epochs, val_loss, 'r')
@@ -78,7 +78,7 @@ def plot_loss(history_dict):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    fig.savefig('data/models/ft_seq2seq_valid.png')
+    fig.savefig('data/models/convgru_valid.png')
 
 
 def prepare_results(metric, p, r, f):
@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 30]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 20]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -206,21 +206,27 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     # encoder
     encoder_inputs = Input(shape=(None,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
-                                   trainable=False, mask_zero=True, name='Encoder-Word-Embedding')(encoder_inputs)
+                                   trainable=False, mask_zero=False, name='Encoder-Word-Embedding')(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h, state_c = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
-    encoder_states = [state_h, state_c]
-    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states, name='Encoder-Model')
+    encoder_conv = Conv1D(filters=256, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
+    encoder_drop = Dropout(0.2)(encoder_conv)
+    encoder_pool = MaxPooling1D(pool_size=4)(encoder_drop)
+    encoder_flatten = Flatten()(encoder_pool)
+    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
     # decoder
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')
     decoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
-                                   trainable=False, mask_zero=True, name='Decoder-Word-Embedding')(decoder_inputs)
+                                   trainable=False, mask_zero=False, name='Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
-    decoder_lstm_outputs, _, _ = decoder_lstm(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_lstm_outputs)
+    decoder_conv = Conv1D(filters=512, kernel_size=1, padding='same', activation='relu',
+                          name='Decoder-Conv1D')(decoder_embeddings)
+    decoder_drop = Dropout(0.2, name='Decoder-Conv1D-Dropout')(decoder_conv)
+    decoder_pool = MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_gru_outputs, _ = decoder_gru(decoder_pool, initial_state=encoder_outputs)
+    decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
     decoder_outputs = Dense(vocabulary_size+1, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
@@ -235,8 +241,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
 
-    f = open("data/models/ft_results.txt", "w", encoding="utf-8")
-    f.write("LSTM \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
+    f = open("data/models/results.txt", "w", encoding="utf-8")
+    f.write("ConvGRU \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
     f.close()
 
     history_dict = history.history
@@ -248,21 +254,21 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     decoder_inputs = seq2seq_model.get_layer('Decoder-Input').input
     decoder_embeddings = seq2seq_model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = seq2seq_model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-    inference_state_h_input = Input(shape=(latent_size,), name='Hidden-State-Input')
-    inference_state_c_input = Input(shape=(latent_size,), name='Cell-State-Input')
+    decoder_conv = seq2seq_model.get_layer('Decoder-Conv1D')(decoder_embeddings)
+    decoder_drop = seq2seq_model.get_layer('Decoder-Conv1D-Dropout')(decoder_conv)
+    decoder_pool = seq2seq_model.get_layer('Decoder-MaxPool1D')(decoder_drop)
 
-    lstm_out, lstm_state_h_out, lstm_state_c_out = seq2seq_model.get_layer('Decoder-LSTM')(
-        [decoder_embeddings, inference_state_h_input, inference_state_c_input])
-    decoder_outputs = seq2seq_model.get_layer('Decoder-Batch-Normalization-2')(lstm_out)
+    gru_inference_state_input = Input(shape=(latent_size,), name='Hidden-State-Input')
+    gru_out, gru_state_out = seq2seq_model.get_layer('Decoder-GRU')([decoder_pool, gru_inference_state_input])
+    decoder_outputs = seq2seq_model.get_layer('Decoder-Batch-Normalization-2')(gru_out)
     dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = Model([decoder_inputs, inference_state_h_input, inference_state_c_input],
-                                          [dense_out, lstm_state_h_out, lstm_state_c_out])
+    decoder_model = Model([decoder_inputs, gru_inference_state_input], [dense_out, gru_state_out])
 
     return encoder_model, decoder_model
 
 
 def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
-    states_value_h, states_value_c = encoder_model.predict(input_sequence)
+    states_value_h = encoder_model.predict(input_sequence)
     target_sequence = np.array(word2idx['<START>']).reshape(1, 1)
 
     prediction = []
@@ -274,7 +280,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     # TODO: pointer generator
 
     while not stop_condition:
-        candidates, state_h, state_c = decoder_model.predict([target_sequence, states_value_h, states_value_c])
+        candidates, state_h = decoder_model.predict([target_sequence, states_value_h])
 
         predicted_word_index = np.argmax(candidates)  # predicted_word_index = numpy.argsort(candidates)[-1]
         if predicted_word_index == 0:
@@ -288,7 +294,6 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
             stop_condition = True
 
         states_value_h = state_h
-        states_value_c = state_c
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
         previous = predicted_word
 
@@ -303,11 +308,11 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
         predictions.append(prediction)
 
-        # print(summaries_test[index:index+1])
-        # print(prediction)
-        f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")
-        f.write(str(prediction))
-        f.close()
+        print(summaries_test[index:index + 1])
+        print('-', prediction, '\n')
+        # f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")
+        # f.write(str(prediction))
+        # f.close()
 
     evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
                             max_n=2,
@@ -336,8 +341,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.95))
-test = int(round(dataset_size * 0.05))
+train = int(round(dataset_size * 0.9))
+test = int(round(dataset_size * 0.1))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -378,7 +383,7 @@ train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
 
-latent_size = 384
+latent_size = 768
 batch_size = 16
 epochs = 16
 
