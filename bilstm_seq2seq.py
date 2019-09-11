@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 20]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 25]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -234,12 +234,12 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     classes = [item for sublist in train_summary.tolist() for item in sublist]
     class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
-    e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min', restore_best_weights=True)
+    e_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1, mode='min', restore_best_weights=True)
     history = seq2seq_model.fit(x=[train_article, train_summary], y=np.expand_dims(train_target, -1),
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
 
-    f = open("data/models/ft_results.txt", "w", encoding="utf-8")
+    f = open("data/models/results.txt", "w", encoding="utf-8")
     f.write("BiLSTM \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
     f.close()
 
@@ -296,7 +296,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
         previous = predicted_word
 
-    return prediction[:-1]
+    final = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    return final
 
 
 def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test):
@@ -340,8 +341,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.95))
-test = int(round(dataset_size * 0.05))
+train = int(round(dataset_size * 0.98))
+test = int(round(dataset_size * 0.02))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -382,9 +383,9 @@ train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
 
-latent_size = 512
+latent_size = 768
 batch_size = 16
-epochs = 16
+epochs = 24
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)

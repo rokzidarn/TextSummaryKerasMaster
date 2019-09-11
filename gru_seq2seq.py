@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 20]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 25]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -288,7 +288,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
         previous = predicted_word
 
-    return prediction[:-1]
+    final = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    return final
 
 
 def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test):
@@ -332,8 +333,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.99))
-test = int(round(dataset_size * 0.01))
+train = int(round(dataset_size * 0.98))
+test = int(round(dataset_size * 0.02))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -376,7 +377,7 @@ test_article = article_inputs[-test:]
 
 latent_size = 768
 batch_size = 16
-epochs = 16
+epochs = 24
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)

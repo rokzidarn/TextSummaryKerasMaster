@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 20]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 25]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -208,7 +208,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     encoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
                                    trainable=False, mask_zero=True, name='Encoder-Word-Embedding')(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h, state_c = LSTM(latent_size, return_state=True, name='Encoder-LSTM')(encoder_embeddings)
+    _, state_h, state_c = LSTM(latent_size, return_state=True, dropout=0.2, recurrent_dropout=0.2,
+                               name='Encoder-LSTM')(encoder_embeddings)
     encoder_states = [state_h, state_c]
     encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
@@ -218,19 +219,21 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     decoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
                                    trainable=False, mask_zero=True, name='Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, name='Decoder-LSTM')
+    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, dropout=0.2, recurrent_dropout=0.2,
+                        name='Decoder-LSTM')
     decoder_lstm_outputs, _, _ = decoder_lstm(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_lstm_outputs)
-    decoder_outputs = Dense(vocabulary_size+1, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
+    decoder_batchnorm = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_lstm_outputs)
+    decoder_outputs = Dense(vocabulary_size+1, activation='softmax', name='Final-Output-Dense')(decoder_batchnorm)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
+    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
+                          metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
     classes = [item for sublist in train_summary.tolist() for item in sublist]
     class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
-    e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min', restore_best_weights=True)
+    e_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1, mode='min', restore_best_weights=True)
     history = seq2seq_model.fit(x=[train_article, train_summary], y=np.expand_dims(train_target, -1),
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
@@ -292,7 +295,8 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
         previous = predicted_word
 
-    return prediction[:-1]
+    final = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    return final
 
 
 def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test):
@@ -336,8 +340,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.99))
-test = int(round(dataset_size * 0.01))
+train = int(round(dataset_size * 0.98))
+test = int(round(dataset_size * 0.02))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -366,8 +370,9 @@ article_unk, summary_unk = count_unknown(article_inputs, summary_inputs)
 print('Dataset size (all/train/test): ', dataset_size, '/', train, '/', test)
 print('Article lengths (min/max/avg): ', article_min_len, '/', article_max_len, '/', article_avg_len)
 print('Summary lengths (min/max/avg): ', summary_min_len, '/', summary_max_len, '/', summary_avg_len)
-print('Vocabulary size, without special tokens: ', vocabulary_size-3)
-print('Unknown (article/summary): ', round(sum(article_unk)/len(titles), 4), '/', round(sum(summary_unk)/len(titles), 4))
+print('Vocabulary size, without special tokens: ', vocabulary_size - 3)
+print('Unknown (article/summary): ', round(sum(article_unk) / len(titles), 4), '/',
+      round(sum(summary_unk) / len(titles), 4))
 
 article_inputs = pad_sequences(article_inputs, maxlen=article_max_len, padding='post')
 summary_inputs = pad_sequences(summary_inputs, maxlen=summary_max_len, padding='post')
@@ -380,7 +385,7 @@ test_article = article_inputs[-test:]
 
 latent_size = 768
 batch_size = 16
-epochs = 16
+epochs = 24
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)
