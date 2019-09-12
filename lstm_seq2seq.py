@@ -307,6 +307,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
         predictions.append(prediction)
 
+        print(titles_test[index:index+1])
         print(summaries_test[index:index+1])
         print('-', prediction, '\n')
         # f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")

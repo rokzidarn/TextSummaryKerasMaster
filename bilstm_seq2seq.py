@@ -208,8 +208,10 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     encoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
                                    trainable=False, mask_zero=True, name='Encoder-Word-Embedding')(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_hf, state_cf, state_hb, state_cb = Bidirectional(LSTM(latent_size, return_state=True,
-                                                                   name='Encoder-LSTM'))(encoder_embeddings)
+    _, state_hf, state_cf, state_hb, state_cb = Bidirectional(
+        LSTM(latent_size, return_state=True, return_sequences=True,
+             dropout=0.2, recurrent_dropout=0.2, name='Encoder-LSTM'))(encoder_embeddings)
+
     state_h = Concatenate()([state_hf, state_hb])
     state_c = Concatenate()([state_cf, state_cb])
 
@@ -234,7 +236,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     classes = [item for sublist in train_summary.tolist() for item in sublist]
     class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
-    e_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1, mode='min', restore_best_weights=True)
+    e_stopping = EarlyStopping(monitor='val_loss', patience=6, verbose=1, mode='min', restore_best_weights=True)
     history = seq2seq_model.fit(x=[train_article, train_summary], y=np.expand_dims(train_target, -1),
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
@@ -308,7 +310,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
         predictions.append(prediction)
 
-        print(summaries_test[index:index + 1])
+        print(titles_test[index:index+1])
+        print(summaries_test[index:index+1])
         print('-', prediction, '\n')
         # f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")
         # f.write(str(prediction))
@@ -363,7 +366,7 @@ for word, i in word2idx.items():
     if embedding_vector is not None and i > 3:
         embedding_matrix[i] = embedding_vector
 
-article_inputs = pre_process(articles, word2idx, True)
+article_inputs = pre_process(articles, word2idx, False)
 summary_inputs = pre_process(summaries, word2idx, False)
 target_inputs = process_targets(summaries, word2idx)
 article_unk, summary_unk = count_unknown(article_inputs, summary_inputs)
@@ -383,7 +386,7 @@ train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
 
-latent_size = 768
+latent_size = 512
 batch_size = 16
 epochs = 24
 

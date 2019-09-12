@@ -224,7 +224,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
                           name='Decoder-Conv1D')(decoder_embeddings)
     decoder_drop = Dropout(0.2, name='Decoder-Conv1D-Dropout')(decoder_conv)
     decoder_pool = MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
-    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, dropout=0.2, recurrent_dropout=0.2,
+                      name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_pool, initial_state=encoder_outputs)
     decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
     decoder_outputs = Dense(vocabulary_size+1, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
@@ -308,7 +309,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
         prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
         predictions.append(prediction)
 
-        print(summaries_test[index:index + 1])
+        print(titles_test[index:index+1])
+        print(summaries_test[index:index+1])
         print('-', prediction, '\n')
         # f = open("data/models/predictions/" + titles_test[index] + ".txt", "w", encoding="utf-8")
         # f.write(str(prediction))
