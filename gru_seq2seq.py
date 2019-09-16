@@ -268,10 +268,6 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
     previous = ''
 
-    # TODO: resolve repetition
-    # TODO: beam search
-    # TODO: pointer generator
-
     while not stop_condition:
         candidates, state_h = decoder_model.predict([target_sequence, states_value_h])
 

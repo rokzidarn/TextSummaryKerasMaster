@@ -281,7 +281,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     return encoder_model, decoder_model
 
 
-def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
+def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw):
     states_value = encoder_model.predict(input_sequence)  # states_value_h, states_value_c
     # simply repeat the encoder states since  both decoding layers were trained on the encoded-vector as initialization
     states_value = states_value + states_value
@@ -292,9 +292,7 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
     stop_condition = False
     previous = ''
 
-    # TODO: resolve repetition
     # TODO: beam search
-    # TODO: pointer generator
 
     while not stop_condition:
         candidates, h1, c1, h2, c2 = decoder_model.predict([target_sequence] + states_value)
@@ -314,15 +312,38 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
         previous = predicted_word
 
-    return prediction[:-1]
+    unique = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    final = copy_mechanism(unique, raw, word2idx)
+    return final
 
 
-def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test):
+def copy_mechanism(prediction, article, word2idx):
+    unks = []
+    for curr in article[0]:
+        if curr not in word2idx.keys():
+            unks.append(curr)
+
+    update = []
+    for curr in prediction:
+        if curr == '<UNK>' and len(unks) > 0:
+            # directly copy first <UNK> word from article, regardless of previous word in article
+            update.append(unks[0])
+            unks.pop(0)
+        elif curr != '<UNK>':
+            update.append(curr)
+        else:
+            update.append('<UNK>')
+
+    return update
+
+
+def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test, raw):
     predictions = []
 
     for index in range(len(titles_test)):
         input_sequence = articles_test[index:index+1]
-        prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
+        raw_article = raw[index:index+1]
+        prediction = predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw_article)
         predictions.append(prediction)
 
         print(titles_test[index:index+1])
@@ -400,6 +421,7 @@ train_article = article_inputs[:train]
 train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
+test_article_raw = articles[-test:]
 
 latent_size = 512
 batch_size = 16
@@ -409,4 +431,4 @@ encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size
                                                     train_article, train_summary, train_target)
 
 evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word,
-         titles[-test:], summaries[-test:], test_article)
+         titles[-test:], summaries[-test:], test_article, test_article_raw)
