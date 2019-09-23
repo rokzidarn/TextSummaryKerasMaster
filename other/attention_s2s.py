@@ -138,7 +138,7 @@ def read_data_train():
     articles = []
     titles = []
 
-    ddir = 'data/bert/'
+    ddir = '../data/test/'
     summary_files = os.listdir(ddir+'summaries/')
     for file in summary_files:
         f = codecs.open(ddir+'summaries/'+file, encoding='utf-8')
@@ -225,14 +225,14 @@ def plot_training(history_dict, epochs):
     plt.ylabel('Loss')
     plt.legend()
     # plt.show()
-    fig.savefig('data/models/attention_seq2seq.png')
+    fig.savefig('../data/models/attention_seq2seq.png')
 
 
 def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_article, batch_size, epochs, sess):
     # encoder
     encoder_inputs = Input(shape=(max_len_article,))
     encoder_embeddings = Embedding(vocabulary_size, embedding_size, trainable=True)(encoder_inputs)
-    # encoder_embeddings = BatchNormalization()(encoder_embeddings)
+    encoder_embeddings = BatchNormalization()(encoder_embeddings)
     encoder_outputs, e_state_h, e_state_c = LSTM(latent_size, return_state=True, return_sequences=True,
                                                  dropout=0.4, recurrent_dropout=0.4)(encoder_embeddings)
     # decoder
@@ -240,8 +240,8 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_a
     decoder_embeddings_layer = Embedding(vocabulary_size, embedding_size, trainable=True)
     decoder_embeddings = decoder_embeddings_layer(decoder_inputs)
 
-    # decoder_batchnorm_layer = BatchNormalization()
-    # encoder_embeddings = decoder_batchnorm_layer(decoder_embeddings)
+    decoder_batchnorm_layer = BatchNormalization()
+    encoder_embeddings = decoder_batchnorm_layer(decoder_embeddings)
     decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, dropout=0.4, recurrent_dropout=0.2)
     decoder_outputs, d_state_h, d_state_c = decoder_lstm(decoder_embeddings, initial_state=[e_state_h, e_state_c])
 
@@ -262,7 +262,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_a
     history = seq2seq_model.fit([X_article, X_summary], numpy.expand_dims(Y_target, -1),
                                 batch_size=batch_size, epochs=epochs)
 
-    f = open("data/models/attention_results.txt", "w", encoding="utf-8")
+    f = open("../data/models/attention_results.txt", "w", encoding="utf-8")
     f.write("Attention \n layers: 1 \n latent size: " + str(latent_size) + "\n embeddings size: " + str(embedding_size) + "\n")
     f.close()
 
@@ -278,7 +278,7 @@ def seq2seq_architecture(latent_size, embedding_size, vocabulary_size, max_len_a
     decoder_hidden_state_input = Input(shape=(max_len_article, latent_size))
 
     decoder_embeddings_inf = decoder_embeddings_layer(decoder_inputs)
-    # decoder_embeddings_inf = decoder_batchnorm_layer(decoder_embeddings_inf)
+    decoder_embeddings_inf = decoder_batchnorm_layer(decoder_embeddings_inf)
     decoder_outputs_inf, state_h_inf, state_c_inf = decoder_lstm(decoder_embeddings_inf,
                                                                  initial_state=[decoder_state_input_h, decoder_state_input_c])
 
@@ -331,9 +331,9 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
 
         predictions.append(prediction)
         print(prediction)
-        f = open("data/bert/predictions/" + titles_train[index] + ".txt", "w", encoding="utf-8")
-        f.write(str(prediction))
-        f.close()
+        # f = open("../data/bert/predictions/" + titles_train[index] + ".txt", "w", encoding="utf-8")
+        # f.write(str(prediction))
+        # f.close()
 
     # evaluation using ROUGE
     evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
@@ -351,7 +351,7 @@ def evaluate(encoder_model, decoder_model, titles_train, summaries_train, X_arti
     all_references = [' '.join(summary) for summary in summaries_train]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/attention_results.txt", "a", encoding="utf-8")
+    f = open("../data/models/attention_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
         result = prepare_results(metric, results['p'], results['r'], results['f'])
         print(result)
