@@ -206,7 +206,7 @@ def prepare_results(metric, p, r, f):
     return '\t{}:\t{}: {:5.2f}\t{}: {:5.2f}\t{}: {:5.2f}'.format(metric, 'P', 100.0*p, 'R', 100.0*r, 'F1', 100.0*f)
 
 
-def clean_data(data):
+def clean_data(data, threshold):
     cleaned = []
 
     for text in data:
@@ -224,16 +224,16 @@ def clean_data(data):
             if not any(re.findall(r'fig|pic|\+|\,|\.|å', e, re.IGNORECASE)):
                 clean.append(e)
 
-        cleaned.append(clean)
+        cleaned.append(clean[:threshold])
 
     return cleaned
 
 
 def analyze_data(data, show_plot=False):
     lengths = [len(text) for text in data]
-    min_len = min(lengths)
-    max_len = max(lengths)
-    avg_len = int(round(sum(lengths)/len(lengths)))
+    min_len = min(lengths)+2  # add 2 because of special tokens, <START>, <END>
+    max_len = max(lengths)+2
+    avg_len = int(round(sum(lengths)/len(lengths)))+2
 
     if show_plot:
         samples = list(range(1, len(lengths) + 1))
@@ -329,7 +329,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
     encoder_embeddings = Embedding(vocabulary_size, 300, weights=[embedding_matrix], trainable=False, mask_zero=False,
                                    name='Encoder-Word-Embedding')
     norm_encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')
-    encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_state=True, return_sequences=True, dropout=0.2, recurrent_dropout=0.2)
+    encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_state=True, return_sequences=True,
+                          dropout=0.2, recurrent_dropout=0.2)
 
     e = encoder_embeddings(encoder_inputs)
     e = norm_encoder_embeddings(e)
@@ -470,8 +471,8 @@ dataset_size = len(titles)
 train = int(round(dataset_size * 0.98))
 test = int(round(dataset_size * 0.02))
 
-articles = clean_data(articles)
-summaries = clean_data(summaries)
+articles = clean_data(articles, 140)
+summaries = clean_data(summaries, 30)
 article_min_len, article_max_len, article_avg_len = analyze_data(articles)
 summary_min_len, summary_max_len, summary_avg_len = analyze_data(summaries)
 
@@ -498,8 +499,7 @@ print('Dataset size (all/train/test): ', dataset_size, '/', train, '/', test)
 print('Article lengths (min/max/avg): ', article_min_len, '/', article_max_len, '/', article_avg_len)
 print('Summary lengths (min/max/avg): ', summary_min_len, '/', summary_max_len, '/', summary_avg_len)
 print('Vocabulary size, with special tokens: ', vocabulary_size)
-print('Unknown (article/summary): ', round(sum(article_unk) / len(titles), 4), '/',
-      round(sum(summary_unk) / len(titles), 4))
+print('Unknown (article/summary): ', round(sum(article_unk) / len(titles), 4), '/', round(sum(summary_unk) / len(titles), 4))
 
 article_inputs = pad_sequences(article_inputs, maxlen=article_max_len, padding='post')
 summary_inputs = pad_sequences(summary_inputs, maxlen=summary_max_len, padding='post')
