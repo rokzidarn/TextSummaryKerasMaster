@@ -144,7 +144,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/test/'
+    ddir = 'data/news/'
 
     article_files = os.listdir(ddir + 'articles/')
     for file in article_files:
@@ -167,7 +167,7 @@ def read_data():
 
 
 def load_embeddings():
-    fin = io.open('data/fasttext/wiki.sl.align.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
+    fin = io.open('data/fasttext/cc.sl.300.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
     n, d = map(int, fin.readline().split())
     embeddings_index = {}
     words = []
@@ -230,10 +230,10 @@ def clean_data(data, threshold):
 
 
 def analyze_data(data, show_plot=False):
-    lengths = [len(text) for text in data]
-    min_len = min(lengths)+2  # add 2 because of special tokens, <START>, <END>
-    max_len = max(lengths)+2
-    avg_len = int(round(sum(lengths)/len(lengths)))+2
+    lengths = [len(text)+2 for text in data]  # add 2 because of special tokens, <START>, <END>
+    min_len = min(lengths)
+    max_len = max(lengths)
+    avg_len = int(round(sum(lengths)/len(lengths)))
 
     if show_plot:
         samples = list(range(1, len(lengths) + 1))
@@ -285,17 +285,23 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     return fdist, word2idx, idx2word
 
 
-def count_unknown(article_inputs, summary_inputs):
+def count_padding_unknown(article_inputs, summary_inputs):
     article_unk = []
     summary_unk = []
+    article_pad = []
+    summary_pad = []
 
     for article in article_inputs:
+        article = list(article)
         article_unk.append(article.count(3)/len(article))
+        article_pad.append(article.count(0)/len(article))
 
     for summary in summary_inputs:
+        summary = list(summary)
         summary_unk.append(summary.count(3)/len(summary))
+        summary_pad.append(summary.count(0)/len(summary))
 
-    return article_unk, summary_unk
+    return article_unk, summary_unk, article_pad, summary_pad
 
 
 def pre_process(texts, word2idx, reverse):
@@ -471,8 +477,8 @@ dataset_size = len(titles)
 train = int(round(dataset_size * 0.98))
 test = int(round(dataset_size * 0.02))
 
-articles = clean_data(articles, 140)
-summaries = clean_data(summaries, 30)
+articles = clean_data(articles, 300)
+summaries = clean_data(summaries, 50)
 article_min_len, article_max_len, article_avg_len = analyze_data(articles)
 summary_min_len, summary_max_len, summary_avg_len = analyze_data(summaries)
 
@@ -493,17 +499,19 @@ for word, i in word2idx.items():
 article_inputs = pre_process(articles, word2idx, True)
 summary_inputs = pre_process(summaries, word2idx, False)
 target_inputs = process_targets(summaries, word2idx)
-article_unk, summary_unk = count_unknown(article_inputs, summary_inputs)
+
+article_inputs = pad_sequences(article_inputs, maxlen=article_max_len, padding='post')
+summary_inputs = pad_sequences(summary_inputs, maxlen=summary_max_len, padding='post')
+target_inputs = pad_sequences(target_inputs, maxlen=summary_max_len, padding='post')
+
+article_unk, summary_unk, article_pad, summary_pad = count_padding_unknown(article_inputs, summary_inputs)
 
 print('Dataset size (all/train/test): ', dataset_size, '/', train, '/', test)
 print('Article lengths (min/max/avg): ', article_min_len, '/', article_max_len, '/', article_avg_len)
 print('Summary lengths (min/max/avg): ', summary_min_len, '/', summary_max_len, '/', summary_avg_len)
 print('Vocabulary size, with special tokens: ', vocabulary_size)
 print('Unknown (article/summary): ', round(sum(article_unk) / len(titles), 4), '/', round(sum(summary_unk) / len(titles), 4))
-
-article_inputs = pad_sequences(article_inputs, maxlen=article_max_len, padding='post')
-summary_inputs = pad_sequences(summary_inputs, maxlen=summary_max_len, padding='post')
-target_inputs = pad_sequences(target_inputs, maxlen=summary_max_len, padding='post')
+print('Padding (article/summary): ', round(sum(article_pad) / len(titles), 4), '/', round(sum(summary_pad) / len(titles), 4))
 
 train_article = article_inputs[:train]
 train_summary = summary_inputs[:train]
