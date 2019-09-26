@@ -28,7 +28,7 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
                 score = beam[1]  # current score
 
                 for target in targets:
-                    candidates.append((i, target[0], score + np.log(probs[target])))  # update score
+                    candidates.append((i, target, score + np.log(probs[0][0][target])))  # update score
 
                 data[i][3] = h  # update states
                 data[i][4] = c
@@ -39,14 +39,18 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
         if width == 0:  # stop, top candidates found
             break
         else:
-            sorted = candidates.sort(key=lambda x: x[2])[width:]  # minimize score, ascending
+            candidates.sort(key=lambda x: x[2])  # minimize score, ascending
+            sorted = candidates[:width]
+
             for i, token, score in sorted:
-                if token == word2idx['<PAD>'] or token == word2idx['<END>']:  # stop predicting
+                if token == 0 or token == word2idx['<END>']:  # stop predicting
                     data[i][1] = score
                     data[i][2] = True
                 else:
                     data[i][1] = score
-                    data[i][0] = data[i][0].append(token)
+                    seq = data[i][0]
+                    seq.append(token)
+                    data[i][0] = seq
 
     predictions = []
     for beam in data:
