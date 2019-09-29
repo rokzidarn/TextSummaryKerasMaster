@@ -1,4 +1,5 @@
 import numpy as np
+import itertools
 
 
 def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
@@ -10,7 +11,18 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
         [[word2idx['<START>']], 0.0, False, state_h, state_c],
         [[word2idx['<START>']], 0.0, False, state_h, state_c],
         [[word2idx['<START>']], 0.0, False, state_h, state_c]]
-    iteration = 0
+
+    iteration = 1   # first iteration outside of loop
+    probs, h, c = decoder_model.predict([np.array(word2idx['<START>']).reshape(1, 1), state_h, state_c])
+    targets = np.argpartition(probs[0][0], -3)[-3:]
+
+    for i, target in enumerate(targets):
+        seq = data[i][0]
+        seq.append(target)
+        data[i][0] = seq
+        data[i][1] = np.log(probs[0][0][target])
+        data[i][3] = h
+        data[i][4] = c
 
     while iteration < max_len:  # predict until max sequence length reached
         iteration += 1
@@ -52,12 +64,17 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
                     seq.append(token)
                     data[i][0] = seq
 
-    predictions = []
+    top = []
     for beam in data:
         sequence = beam[0]
         prediction = []
         for token in sequence:
             prediction.append(idx2word[token])
-        predictions.append(prediction)
+        top.append(prediction)
+
+    predictions = []
+    for t in top:
+        prediction = [x[0] for x in itertools.groupby(t[1:])]
+        predictions.append(' '.join(prediction))
 
     return predictions
