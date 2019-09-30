@@ -10,12 +10,131 @@ import matplotlib.pyplot as plt
 from sklearn.utils import class_weight
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+import tensorflow as tf
+from tensorflow.python.keras.layers import Layer
+from tensorflow.python.keras import backend as K
 from keras.preprocessing.sequence import pad_sequences
 from tensorflow.python.keras.callbacks import EarlyStopping
-from tensorflow.python.keras.layers import Input, LSTM, Embedding, Dense, BatchNormalization
+from tensorflow.python.keras.layers import Input, LSTM, Embedding, Dense, BatchNormalization, TimeDistributed
 from tensorflow.python.keras.models import Model
-# from keras.models import Model
-# from keras.layers import Input, LSTM, Dense, Embedding, BatchNormalization
+
+
+class AttentionLayer(Layer):
+    """
+    This class implements Bahdanau attention
+    There are three sets of weights introduced W_a, U_a, and V_a
+     """
+
+    def __init__(self, **kwargs):
+        super(AttentionLayer, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert isinstance(input_shape, list)
+        # Create a trainable weight variable for this layer.
+
+        self.W_a = self.add_weight(name='W_a',
+                                   shape=tf.TensorShape((input_shape[0][2], input_shape[0][2])),
+                                   initializer='uniform',
+                                   trainable=True)
+        self.U_a = self.add_weight(name='U_a',
+                                   shape=tf.TensorShape((input_shape[1][2], input_shape[0][2])),
+                                   initializer='uniform',
+                                   trainable=True)
+        self.V_a = self.add_weight(name='V_a',
+                                   shape=tf.TensorShape((input_shape[0][2], 1)),
+                                   initializer='uniform',
+                                   trainable=True)
+
+        super(AttentionLayer, self).build(input_shape)  # Be sure to call this at the end
+
+    def call(self, inputs, verbose=False):
+        """
+        inputs: [encoder_output_sequence, decoder_output_sequence]
+        """
+        assert type(inputs) == list
+        encoder_out_seq, decoder_out_seq = inputs
+        if verbose:
+            print('encoder_out_seq>', encoder_out_seq.shape)
+            print('decoder_out_seq>', decoder_out_seq.shape)
+
+        def energy_step(inputs, states):
+            """ Step function for computing energy for a single decoder state """
+
+            assert_msg = "States must be a list. However states {} is of type {}".format(states, type(states))
+            assert isinstance(states, list) or isinstance(states, tuple), assert_msg
+
+            """ Some parameters required for shaping tensors"""
+            en_seq_len, en_hidden = encoder_out_seq.shape[1], encoder_out_seq.shape[2]
+            de_hidden = inputs.shape[-1]
+
+            """ Computing S.Wa where S=[s0, s1, ..., si]"""
+            # <= batch_size*en_seq_len, latent_dim
+            reshaped_enc_outputs = K.reshape(encoder_out_seq, (-1, en_hidden))
+            # <= batch_size*en_seq_len, latent_dim
+            W_a_dot_s = K.reshape(K.dot(reshaped_enc_outputs, self.W_a), (-1, en_seq_len, en_hidden))
+            if verbose:
+                print('wa.s>',W_a_dot_s.shape)
+
+            """ Computing hj.Ua """
+            U_a_dot_h = K.expand_dims(K.dot(inputs, self.U_a), 1)  # <= batch_size, 1, latent_dim
+            if verbose:
+                print('Ua.h>',U_a_dot_h.shape)
+
+            """ tanh(S.Wa + hj.Ua) """
+            # <= batch_size*en_seq_len, latent_dim
+            reshaped_Ws_plus_Uh = K.tanh(K.reshape(W_a_dot_s + U_a_dot_h, (-1, en_hidden)))
+            if verbose:
+                print('Ws+Uh>', reshaped_Ws_plus_Uh.shape)
+
+            """ softmax(va.tanh(S.Wa + hj.Ua)) """
+            # <= batch_size, en_seq_len
+            e_i = K.reshape(K.dot(reshaped_Ws_plus_Uh, self.V_a), (-1, en_seq_len))
+            # <= batch_size, en_seq_len
+            e_i = K.softmax(e_i)
+
+            if verbose:
+                print('ei>', e_i.shape)
+
+            return e_i, [e_i]
+
+        def context_step(inputs, states):
+            """ Step function for computing ci using ei """
+            # <= batch_size, hidden_size
+            c_i = K.sum(encoder_out_seq * K.expand_dims(inputs, -1), axis=1)
+            if verbose:
+                print('ci>', c_i.shape)
+            return c_i, [c_i]
+
+        def create_inital_state(inputs, hidden_size):
+            # We are not using initial states, but need to pass something to K.rnn funciton
+            fake_state = K.zeros_like(inputs)  # <= (batch_size, enc_seq_len, latent_dim
+            fake_state = K.sum(fake_state, axis=[1, 2])  # <= (batch_size)
+            fake_state = K.expand_dims(fake_state)  # <= (batch_size, 1)
+            fake_state = K.tile(fake_state, [1, hidden_size])  # <= (batch_size, latent_dim
+            return fake_state
+
+        fake_state_c = create_inital_state(encoder_out_seq, encoder_out_seq.shape[-1])
+        fake_state_e = create_inital_state(encoder_out_seq, encoder_out_seq.shape[1])  # <= (batch_size, enc_seq_len, latent_dim
+
+        """ Computing energy outputs """
+        # e_outputs => (batch_size, de_seq_len, en_seq_len)
+        last_out, e_outputs, _ = K.rnn(
+            energy_step, decoder_out_seq, [fake_state_e],
+        )
+
+        """ Computing context vectors """
+        last_out, c_outputs, _ = K.rnn(
+            context_step, e_outputs, [fake_state_c],
+        )
+
+        return c_outputs, e_outputs
+
+    def compute_output_shape(self, input_shape):
+        """ Outputs produced by the layer """
+        return [
+            tf.TensorShape((input_shape[1][0], input_shape[1][1], input_shape[1][2])),
+            tf.TensorShape((input_shape[1][0], input_shape[1][1], input_shape[0][1]))
+        ]
 
 
 def read_data():
@@ -86,7 +205,7 @@ def prepare_results(metric, p, r, f):
                                                                  100.0 * f)
 
 
-def clean_data(data):
+def clean_data(data, threshold):
     cleaned = []
 
     for text in data:
@@ -104,13 +223,13 @@ def clean_data(data):
             if not any(re.findall(r'fig|pic|\+|\,|\.|å', e, re.IGNORECASE)):
                 clean.append(e)
 
-        cleaned.append(clean)
+        cleaned.append(clean[:threshold])
 
     return cleaned
 
 
 def analyze_data(data, show_plot=False):
-    lengths = [len(text) for text in data]
+    lengths = [len(text)+2 for text in data]  # add 2 because of special tokens <START>, <END>
     min_len = min(lengths)
     max_len = max(lengths)
     avg_len = int(round(sum(lengths) / len(lengths)))
@@ -130,8 +249,7 @@ def analyze_data(data, show_plot=False):
 
 def build_vocabulary(tokens, embedding_words, write_dict=False):
     fdist = nltk.FreqDist(tokens)
-    # fdist.pprint(maxlen=50)
-    # fdist.plot(50)
+    # fdist.plot(50)  # fdist.pprint(maxlen=50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
     sub_all = [element for element in all if element[1] > 25]  # cut vocabulary
@@ -143,11 +261,10 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
             embedded.append(element)
 
     word2idx = {w: (i + 4) for i, (w, _) in enumerate(embedded)}
-    # word2idx['<PAD>'] = 0  # padding
+    word2idx['<PAD>'] = 0  # padding
     word2idx['<START>'] = 1  # start token
     word2idx['<END>'] = 2  # end token
     word2idx['<UNK>'] = 3  # unknown token
-    # with <START>, <END>, <UNK> tokens, without <PAD> token
 
     idx2word = {v: k for k, v in word2idx.items()}  # inverted vocabulary, for decoding, 11 -> 'word'
 
@@ -173,8 +290,8 @@ def count_padding_unknown(article_inputs, summary_inputs):
 
     for article in article_inputs:
         article = list(article)
-        article_unk.append(article.count(3)/len(article))
-        article_pad.append(article.count(0)/len(article))
+        article_unk.append(article.count(3)/len(article))  # <UNK> = 3
+        article_pad.append(article.count(0)/len(article))  # <PAD> = 0
 
     for summary in summary_inputs:
         summary = list(summary)
@@ -209,31 +326,51 @@ def process_targets(summaries, word2idx):
     return target_inputs
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs, train_article,
-                         train_summary, train_target):
+def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embedding_matrix, batch_size, epochs,
+                         train_article, train_summary, train_target):
     # encoder
-    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
-    encoder_embeddings = Embedding(vocabulary_size + 1, 300, weights=[embedding_matrix],
-                                   trainable=False, mask_zero=True, name='Encoder-Word-Embedding')(encoder_inputs)
-    encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    _, state_h, state_c = LSTM(latent_size, return_state=True, dropout=0.2, recurrent_dropout=0.2,
-                               name='Encoder-LSTM')(encoder_embeddings)
-    encoder_states = [state_h, state_c]
-    encoder_model = Model(inputs=encoder_inputs, outputs=encoder_states, name='Encoder-Model')
-    encoder_outputs = encoder_model(encoder_inputs)
+    encoder_inputs = Input(shape=(max_len_article,), name='Encoder-Input')
+    encoder_embeddings = Embedding(vocabulary_size, 300, weights=[embedding_matrix], trainable=False, mask_zero=False,
+                                   name='Encoder-Word-Embedding')
+    norm_encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')
+    encoder_lstm_1 = LSTM(latent_size, name='Encoder-LSTM-1', return_sequences=True, return_state=True,
+                          dropout=0.2, recurrent_dropout=0.2)
+    encoder_lstm_2 = LSTM(latent_size, name='Encoder-LSTM-2', return_sequences=True, return_state=True,
+                          dropout=0.2, recurrent_dropout=0.2)
+    # the sequence of the last layer is not returned because we want a single vector that stores everything
+
+    e = encoder_embeddings(encoder_inputs)
+    e = norm_encoder_embeddings(e)
+    e, e_state_h_1, e_state_c_1 = encoder_lstm_1(e)
+    encoder_outputs, e_state_h_2, e_state_c_2 = encoder_lstm_2(e)
+    # the encoded fix-sized vector which seq2seq is all about
+
+    encoder_model = Model(inputs=encoder_inputs, outputs=[encoder_outputs, e_state_h_2, e_state_c_2,
+                                                          e_state_h_2, e_state_c_2])
 
     # decoder
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')
-    decoder_embeddings = Embedding(vocabulary_size + 1, 300, weights=[embedding_matrix],
-                                   trainable=False, mask_zero=True, name='Decoder-Word-Embedding')(decoder_inputs)
-    decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-    decoder_lstm = LSTM(latent_size, return_state=True, return_sequences=True, dropout=0.2, recurrent_dropout=0.2,
-                        name='Decoder-LSTM')
-    decoder_lstm_outputs, _, _ = decoder_lstm(decoder_embeddings, initial_state=encoder_outputs)
-    decoder_batchnorm = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_lstm_outputs)
-    decoder_outputs = Dense(vocabulary_size + 1, activation='softmax', name='Final-Output-Dense')(decoder_batchnorm)
+    decoder_embeddings = Embedding(vocabulary_size, 300, weights=[embedding_matrix], trainable=False, mask_zero=False,
+                                   name='Decoder-Word-Embedding')
+    norm_decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')
+    decoder_lstm_1 = LSTM(latent_size, name='Decoder-LSTM-1', return_sequences=True, return_state=True,
+                          dropout=0.2, recurrent_dropout=0.2)
+    decoder_lstm_2 = LSTM(latent_size, name='Decoder-LSTM-2', return_sequences=True, return_state=True,
+                          dropout=0.2, recurrent_dropout=0.2)
+    norm_decoder = BatchNormalization(name='Decoder-Batch-Normalization-2')
+    attention_layer = AttentionLayer(name='Attention-Layer')
+    decoder_dense = TimeDistributed(Dense(vocabulary_size, activation='softmax'), name="Final-Output-Dense")
 
-    seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+    d = decoder_embeddings(decoder_inputs)
+    d = norm_decoder_embeddings(d)
+    d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=[e_state_h_2, e_state_c_2])
+    decoder_outputs, d_state_h_2, d_state_c_2 = decoder_lstm_2(d, initial_state=[e_state_h_2, e_state_c_2])
+    decoder_outputs = norm_decoder(decoder_outputs)
+    attention_out, attention_states = attention_layer([encoder_outputs, decoder_outputs])
+    decoder_concat_input = tf.keras.layers.Concatenate(axis=-1, name='Concat-Layer')([decoder_outputs, attention_out])
+    decoder_outputs = decoder_dense(decoder_concat_input)
+
+    seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
     seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
@@ -247,40 +384,49 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
                                 callbacks=[e_stopping], class_weight=class_weights)
 
     f = open("data/models/results.txt", "w", encoding="utf-8")
-    f.write("LSTM \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
+    f.write("Final LSTM \n layers: 2 \n latent size: " + str(latent_size) + "\n vocab size: " +
+            str(vocabulary_size) + "\n")
     f.close()
 
     history_dict = history.history
     plot_loss(history_dict)
 
     # inference
-    encoder_model = seq2seq_model.get_layer('Encoder-Model')
+    decoder_initial_state_a1 = Input(shape=(max_len_article, latent_size), name='Decoder-Init-A1')
+    decoder_initial_state_h1 = Input(shape=(latent_size,), name='Decoder-Init-H1')
+    decoder_initial_state_c1 = Input(shape=(latent_size,), name='Decoder-Init-C1')
+    decoder_initial_state_h2 = Input(shape=(latent_size,), name='Decoder-Init-H2')
+    decoder_initial_state_c2 = Input(shape=(latent_size,), name='Decoder-Init-C2')
+    # every layer keeps its own states, important at predicting
 
-    decoder_inputs = seq2seq_model.get_layer('Decoder-Input').input
-    decoder_embeddings = seq2seq_model.get_layer('Decoder-Word-Embedding')(decoder_inputs)
-    decoder_embeddings = seq2seq_model.get_layer('Decoder-Batch-Normalization-1')(decoder_embeddings)
-    inference_state_h_input = Input(shape=(latent_size,), name='Hidden-State-Input')
-    inference_state_c_input = Input(shape=(latent_size,), name='Cell-State-Input')
+    i = decoder_embeddings(decoder_inputs)
+    i = norm_decoder_embeddings(i)
+    i, h1, c1 = decoder_lstm_1(i, initial_state=[decoder_initial_state_h1, decoder_initial_state_c1])
+    lstm_inf, h2, c2 = decoder_lstm_2(i, initial_state=[decoder_initial_state_h2, decoder_initial_state_c2])
+    lstm_inf = norm_decoder(lstm_inf)
+    attn_out_inf, attn_states_inf = attention_layer([decoder_initial_state_a1, lstm_inf])
+    decoder_concat_inf = tf.keras.layers.Concatenate(axis=-1, name='Concat')([lstm_inf, attn_out_inf])
+    decoder_outputs_inf = decoder_dense(decoder_concat_inf)
 
-    lstm_out, lstm_state_h_out, lstm_state_c_out = seq2seq_model.get_layer('Decoder-LSTM')(
-        [decoder_embeddings, inference_state_h_input, inference_state_c_input])
-    decoder_outputs = seq2seq_model.get_layer('Decoder-Batch-Normalization-2')(lstm_out)
-    dense_out = seq2seq_model.get_layer('Final-Output-Dense')(decoder_outputs)
-    decoder_model = Model([decoder_inputs, inference_state_h_input, inference_state_c_input],
-                          [dense_out, lstm_state_h_out, lstm_state_c_out])
+    decoder_model = Model(inputs=[decoder_inputs] + [decoder_initial_state_a1,
+                                                     decoder_initial_state_h1, decoder_initial_state_c1,
+                                                     decoder_initial_state_h2, decoder_initial_state_c2],
+                          outputs=[decoder_outputs_inf] + [h1, c1, h2, c2])
 
     return encoder_model, decoder_model
 
 
-def greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
-    states_value_h, states_value_c = encoder_model.predict(input_sequence)
+def greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw):
+    encoder_out, h1, c1, h2, c2 = encoder_model.predict(input_sequence)
+    # simply repeat the encoder states since  both decoding layers were trained on the encoded-vector as initialization
     target_sequence = np.array(word2idx['<START>']).reshape(1, 1)
+    # populate the first character of target sequence with the start character
 
     prediction = []
     stop_condition = False
 
     while not stop_condition:
-        candidates, state_h, state_c = decoder_model.predict([target_sequence, states_value_h, states_value_c])
+        candidates, dh1, dc1, dh2, dc2 = decoder_model.predict([target_sequence] + [encoder_out, h1, c1, h2, c2])
 
         predicted_word_index = np.argmax(candidates)
         if predicted_word_index == 0:
@@ -293,26 +439,27 @@ def greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2wo
         if (predicted_word == '<END>') or (len(prediction) > max_len):
             stop_condition = True
 
-        states_value_h = state_h
-        states_value_c = state_c
+        h1, c1, h2, c2 = dh1, dc1, dh2, dc2
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
 
-    final = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    unique = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
+    final = copy_mechanism(unique, raw, word2idx)  # fill <UNK> tokens
     return ' '.join(final)
 
 
-def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
-    state_h, state_c = encoder_model.predict(input_sequence)
-    # data[i] = [[prediction], score, stop_condition, state_h, state_c] = beam
+def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw):
+    encoder_out, h1, c1, h2, c2 = encoder_model.predict(input_sequence)
+    # data[i] = [[prediction], score, stop_condition, h1, c1, h2, c2] = beam
     # target_sequence = prediction[-1] = last word
 
     data = [
-        [[word2idx['<START>']], 0.0, False, state_h, state_c],
-        [[word2idx['<START>']], 0.0, False, state_h, state_c],
-        [[word2idx['<START>']], 0.0, False, state_h, state_c]]
+        [[word2idx['<START>']], 0.0, False, h1, c1, h2, c2],
+        [[word2idx['<START>']], 0.0, False, h1, c1, h2, c2],
+        [[word2idx['<START>']], 0.0, False, h1, c1, h2, c2]]
 
     iteration = 1   # first iteration outside of loop
-    probs, h, c = decoder_model.predict([np.array(word2idx['<START>']).reshape(1, 1), state_h, state_c])
+    probs, dh1, dc1, dh2, dc2 = decoder_model.predict([np.array(word2idx['<START>']).reshape(1, 1)] +
+                                                      [encoder_out, h1, c1, h2, c2])
     targets = np.argpartition(probs[0][0], -3)[-3:]
 
     for i, target in enumerate(targets):
@@ -320,8 +467,10 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
         seq.append(target)
         data[i][0] = seq
         data[i][1] = np.log(probs[0][0][target])
-        data[i][3] = h
-        data[i][4] = c
+        data[i][3] = dh1
+        data[i][4] = dc1
+        data[i][5] = dh2
+        data[i][6] = dc2
 
     while iteration < max_len:  # predict until max sequence length reached
         iteration += 1
@@ -331,18 +480,18 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
             stop_condition = beam[2]
             if not stop_condition:
                 target_sequence = np.array(beam[0][-1]).reshape(1, 1)  # previous word
-                state_h = beam[3]
-                state_c = beam[4]
+                h1 = beam[3]
+                c1 = beam[4]
+                h2 = beam[5]
+                c2 = beam[6]
 
-                probs, h, c = decoder_model.predict([target_sequence, state_h, state_c])
+                probs, dh1, dc1, dh2, dc2 = decoder_model.predict([target_sequence] + [encoder_out, h1, c1, h2, c2])
                 targets = np.argpartition(probs[0][0], -3)[-3:]  # predicted word indices
                 score = beam[1]  # current score
 
                 for target in targets:
-                    candidates.append((i, target, score + np.log(probs[0][0][target])))  # update score
-
-                data[i][3] = h  # update states
-                data[i][4] = c
+                    candidates.append((i, target, score + np.log(probs[0][0][target]), [dh1, dc1, dh2, dc2]))
+                    # update score, states
 
         # keep only top candidates, width of beam
         width = sum([1 if beam[2] == False else 0 for beam in data])
@@ -353,15 +502,19 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
             candidates.sort(key=lambda x: x[2])  # minimize score, ascending
             sorted = candidates[:width]
 
-            for i, token, score in sorted:
-                if token == 0 or token == word2idx['<END>']:  # stop predicting
+            for i, token, score, states in sorted:
+                if token == 0 or token == word2idx['<END>']:  # padding, stop predicting
                     data[i][1] = score
                     data[i][2] = True
                 else:
-                    data[i][1] = score
                     seq = data[i][0]
                     seq.append(token)
                     data[i][0] = seq
+                    data[i][1] = score
+                    data[i][3] = states[0]
+                    data[i][4] = states[1]
+                    data[i][5] = states[2]
+                    data[i][6] = states[3]
 
     top = []
     for beam in data:
@@ -373,20 +526,41 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
 
     predictions = []
     for t in top:
-        prediction = [x[0] for x in itertools.groupby(t[1:])]
-        predictions.append(' '.join(prediction))
+        unique = [x[0] for x in itertools.groupby(t[1:])]
+        final = copy_mechanism(unique, raw, word2idx)  # fill <UNK> tokens
+        predictions.append(' '.join(final))
 
     return predictions
 
 
-def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test):
+def copy_mechanism(prediction, article, word2idx):
+    unks = []
+    for curr in article[0]:
+        if curr not in word2idx.keys():
+            unks.append(curr)
+
+    update = []
+    for curr in prediction:
+        if curr == '<UNK>' and len(unks) > 0:
+            # directly copy first <UNK> word from article, regardless of previous word in article
+            update.append(unks[0])
+            unks.pop(0)
+        elif curr != '<UNK>':
+            update.append(curr)
+        else:
+            update.append('<UNK>')
+
+    return update
+
+
+def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_test, summaries_test, articles_test, raw):
     greedy_predictions = []
     beam_predictions = []
 
     for index in range(len(titles_test)):
         input_sequence = articles_test[index:index + 1]
-        prediction_greedy = greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
-        prediction_beam = beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len)
+        prediction_greedy = greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw)
+        prediction_beam = beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw)
         greedy_predictions.append(prediction_greedy)
         beam_predictions.append(prediction_beam)
 
@@ -403,7 +577,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
                             length_limit_type='words',
                             apply_avg=False,
                             apply_best=True,
-                            alpha=0.5,  # default F1 score
+                            alpha=0.5,
                             weight_factor=1.2,
                             stemming=True)
 
@@ -431,8 +605,8 @@ dataset_size = len(titles)
 train = int(round(dataset_size * 0.98))
 test = int(round(dataset_size * 0.02))
 
-articles = clean_data(articles)
-summaries = clean_data(summaries)
+articles = clean_data(articles, 300)
+summaries = clean_data(summaries, 50)
 article_min_len, article_max_len, article_avg_len = analyze_data(articles)
 summary_min_len, summary_max_len, summary_avg_len = analyze_data(summaries)
 
@@ -441,7 +615,7 @@ all_tokens = list(itertools.chain(*articles)) + list(itertools.chain(*summaries)
 fdist, word2idx, idx2word = build_vocabulary(all_tokens, embedding_words)
 vocabulary_size = len(word2idx.items())
 
-embedding_matrix = np.zeros((vocabulary_size + 1, 300))
+embedding_matrix = np.zeros((vocabulary_size, 300))
 embedding_matrix[1] = np.array(np.random.uniform(-1.0, 1.0, 300))  # <START>
 embedding_matrix[2] = np.array(np.random.uniform(-1.0, 1.0, 300))  # <END>
 embedding_matrix[3] = np.array(np.random.uniform(-1.0, 1.0, 300))  # <UNK>
@@ -463,7 +637,7 @@ article_unk, summary_unk, article_pad, summary_pad = count_padding_unknown(artic
 print('Dataset size (all/train/test): ', dataset_size, '/', train, '/', test)
 print('Article lengths (min/max/avg): ', article_min_len, '/', article_max_len, '/', article_avg_len)
 print('Summary lengths (min/max/avg): ', summary_min_len, '/', summary_max_len, '/', summary_avg_len)
-print('Vocabulary size, without special tokens: ', vocabulary_size - 3)
+print('Vocabulary size, without special tokens: ', vocabulary_size)
 print('Unknown (article/summary): ', round(sum(article_unk) / len(titles), 4), '/',
       round(sum(summary_unk) / len(titles), 4))
 print('Padding (article/summary): ', round(sum(article_pad) / len(titles), 4), '/',
@@ -473,13 +647,14 @@ train_article = article_inputs[:train]
 train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
+test_article_raw = articles[-test:]
 
 latent_size = 512
 batch_size = 16
 epochs = 24
 
-encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
-                                                    train_article, train_summary, train_target)
+encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, article_max_len, embedding_matrix,
+                                                    batch_size, epochs, train_article, train_summary, train_target)
 
-evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word,
-         titles[-test:], summaries[-test:], test_article)
+evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word, titles[-test:], summaries[-test:],
+         test_article, test_article_raw)
