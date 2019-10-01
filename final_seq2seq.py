@@ -535,7 +535,7 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
 
 def copy_mechanism(prediction, article, word2idx):
     unks = []
-    for curr in article[0]:
+    for curr in article:
         if curr not in word2idx.keys():
             unks.append(curr)
 
@@ -559,15 +559,15 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
     for index in range(len(titles_test)):
         input_sequence = articles_test[index:index + 1]
-        prediction_greedy = greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw)
-        prediction_beam = beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw)
-        greedy_predictions.append(prediction_greedy)
-        beam_predictions.append(prediction_beam)
+        pred_greedy = greedy_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw[index])
+        pred_beam = beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw[index])
+        greedy_predictions.append(pred_greedy)
+        beam_predictions.append(pred_beam)
 
         print(' '.join(titles_test[index:index + 1]))
         print(' '.join(summaries_test[index:index + 1][0]))
-        print(prediction_greedy)
-        print(prediction_beam, "\n")
+        print(pred_greedy)
+        print(pred_beam, "\n")
 
     references = [' '.join(summary) for summary in summaries_test]
     evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
