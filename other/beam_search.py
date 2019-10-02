@@ -1,28 +1,28 @@
 import numpy as np
 import itertools
+import copy
 
 
-def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len):
-    state_h, state_c = encoder_model.predict(input_sequence)
-    # data[i] = [[prediction], score, stop_condition, state_h, state_c] = beam
-    # target_sequence = prediction[-1] = last word
+def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word, max_len, raw):
+    encoder_out, h1, c1, h2, c2 = encoder_model.predict(input_sequence)
+    # data[i] = [[prediction], score, stop_condition, [encoder_out, h1, c1, h2, c2]] = beam
 
     data = [
-        [[word2idx['<START>']], 0.0, False, state_h, state_c],
-        [[word2idx['<START>']], 0.0, False, state_h, state_c],
-        [[word2idx['<START>']], 0.0, False, state_h, state_c]]
+        [[word2idx['<START>']], 0.0, False, [encoder_out, h1, c1, h2, c2]],
+        [[word2idx['<START>']], 0.0, False, [encoder_out, h1, c1, h2, c2]],
+        [[word2idx['<START>']], 0.0, False, [encoder_out, h1, c1, h2, c2]]]
 
     iteration = 1   # first iteration outside of loop
-    probs, h, c = decoder_model.predict([np.array(word2idx['<START>']).reshape(1, 1), state_h, state_c])
+    probs, dh1, dc1, dh2, dc2 = decoder_model.predict([np.array(word2idx['<START>']).reshape(1, 1)] +
+                                                      [encoder_out, h1, c1, h2, c2])
     targets = np.argpartition(probs[0][0], -3)[-3:]
 
     for i, target in enumerate(targets):
-        seq = data[i][0]
-        seq.append(target)
-        data[i][0] = seq
-        data[i][1] = np.log(probs[0][0][target])
-        data[i][3] = h
-        data[i][4] = c
+        beam = data[i]
+        beam[0].append(target)
+        beam[1] = np.log(probs[0][0][target])
+        beam[3] = [encoder_out, dh1, dc1, dh2, dc2]
+        data[i] = beam
 
     while iteration < max_len:  # predict until max sequence length reached
         iteration += 1
@@ -32,37 +32,29 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
             stop_condition = beam[2]
             if not stop_condition:
                 target_sequence = np.array(beam[0][-1]).reshape(1, 1)  # previous word
-                state_h = beam[3]
-                state_c = beam[4]
+                states = beam[3]
 
-                probs, h, c = decoder_model.predict([target_sequence, state_h, state_c])
+                probs, dh1, dc1, dh2, dc2 = decoder_model.predict([target_sequence] + states)
                 targets = np.argpartition(probs[0][0], -3)[-3:]  # predicted word indices
                 score = beam[1]  # current score
 
-                for target in targets:
-                    candidates.append((i, target, score + np.log(probs[0][0][target])))  # update score
+                for i, target in enumerate(targets):
+                    candidate = copy.deepcopy(beam)
+                    candidate[0].append(target)
+                    candidate[1] = score + np.log(probs[0][0][target])
+                    candidate[3] = [encoder_out, dh1, dc1, dh2, dc2]
+                    if target == 0 or target == word2idx['<END>']:
+                        candidate[2] = True
 
-                data[i][3] = h  # update states
-                data[i][4] = c
+                    candidates.append(candidate)  # update score, states
 
-        # keep only top candidates, width of beam
-        width = sum([1 if beam[2] == False else 0 for beam in data])
+        candidates.sort(key=lambda x: x[1], reverse=True)  # minimize score, ascending
 
-        if width == 0:  # stop, top candidates found
-            break
-        else:
-            candidates.sort(key=lambda x: x[2])  # minimize score, ascending
-            sorted = candidates[:width]
-
-            for i, token, score in sorted:
-                if token == 0 or token == word2idx['<END>']:  # stop predicting
-                    data[i][1] = score
-                    data[i][2] = True
-                else:
-                    data[i][1] = score
-                    seq = data[i][0]
-                    seq.append(token)
-                    data[i][0] = seq
+        next = 0
+        for i in range(len(data)):
+            if data[i][2] == False:
+                data[i] = candidates[next]
+                next += 1
 
     top = []
     for beam in data:
@@ -74,7 +66,7 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
 
     predictions = []
     for t in top:
-        prediction = [x[0] for x in itertools.groupby(t[1:])]
-        predictions.append(' '.join(prediction))
+        final = [x[0] for x in itertools.groupby(t[1:-1])]
+        predictions.append(' '.join(final))
 
     return predictions
