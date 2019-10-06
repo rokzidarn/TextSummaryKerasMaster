@@ -48,7 +48,7 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
 
                     candidates.append(candidate)  # update score, states
 
-        candidates.sort(key=lambda x: x[1], reverse=True)  # minimize score, ascending
+        candidates.sort(key=lambda x: x[1], reverse=True)  # maximize score, ascending
 
         next = 0
         for i in range(len(data)):

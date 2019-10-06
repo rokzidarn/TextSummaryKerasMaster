@@ -364,7 +364,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
 
     d = decoder_embeddings(decoder_inputs)
     d = norm_decoder_embeddings(d)
-    d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=[e_state_h_2, e_state_c_2])
+    d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=[e_state_h_1, e_state_c_1])
     decoder_outputs, d_state_h_2, d_state_c_2 = decoder_lstm_2(d, initial_state=[e_state_h_2, e_state_c_2])
     decoder_outputs = norm_decoder(decoder_outputs)
     attention_out, attention_states = attention_layer([encoder_outputs, decoder_outputs])
@@ -486,14 +486,14 @@ def beam_search(encoder_model, decoder_model, input_sequence, word2idx, idx2word
                 for i, target in enumerate(targets):
                     candidate = copy.deepcopy(beam)
                     candidate[0].append(target)
-                    candidate[1] = score + np.log(probs[0][0][target])
+                    candidate[1] = score + np.log(probs[0][0][target])  # add negative values, search for max
                     candidate[3] = [encoder_out, dh1, dc1, dh2, dc2]
                     if target == 0 or target == word2idx['<END>']:
                         candidate[2] = True
 
                     candidates.append(candidate)  # update score, states
 
-        candidates.sort(key=lambda x: x[1], reverse=True)  # minimize score, ascending
+        candidates.sort(key=lambda x: x[1]/len(x[0]), reverse=True)  # maximize score, ascending
 
         next = 0
         for i in range(len(data)):
@@ -636,7 +636,7 @@ test_article_raw = articles[-test:]
 
 latent_size = 512
 batch_size = 16
-epochs = 24
+epochs = 32
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, article_max_len, embedding_matrix,
                                                     batch_size, epochs, train_article, train_summary, train_target)

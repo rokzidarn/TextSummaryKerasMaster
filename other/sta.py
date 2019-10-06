@@ -6,6 +6,7 @@ import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 import nltk
 
+
 def clean(text):
     tokens = nltk.word_tokenize(text)
     exclude_list = [',', '.', '(', ')', '>', '<', '»', '«', ':', '–', '-', '+', '–', '--', '/', '|', '“', '”', '•',
@@ -29,6 +30,7 @@ article_len = []
 summary_len = []
 i = 0
 data = os.listdir(datapath1)
+c = 1
 
 for file in data:
     i += 1
@@ -37,6 +39,9 @@ for file in data:
 
     filepath1 = datapath1 + '/' + file
     filepath2 = (datapath2 + '/' + file).replace("src", "tgt")
+
+    #print(filepath1)
+    #print(filepath2)
 
     try:
         arr1 = []
@@ -47,7 +52,7 @@ for file in data:
                 line = fp1.readline()
                 arr1.append(line)
 
-            article = ' '.join(arr1)
+            article = ''.join(arr1)
 
         arr2 = []
         with open(filepath2, encoding='utf-8') as fp2:
@@ -57,14 +62,23 @@ for file in data:
                 line = fp2.readline()
                 arr2.append(line)
 
-            summary = ' '.join(arr2)
+            summary = ''.join(arr2)
 
         #print(summary)
         #print(article)
+
         article_words_len = len(clean(article))
         summary_words_len = len(clean(summary))
         article_len.append(article_words_len)
         summary_len.append(summary_words_len)
+
+        if article_words_len >= 100 and article_words_len <= 300 and summary_words_len >= 20 and summary_words_len <= 60:
+            with codecs.open('../data/tmp/articles/' + str(c) + '.txt', 'w', encoding='utf8') as f:
+                f.write("{}\n".format(article))
+            with codecs.open('../data/tmp/summaries/' + str(c) + '.txt', 'w', encoding='utf8') as f:
+                f.write("{}\n".format(summary))
+
+            c += 1
 
     except:
         print("PROBLEM")
