@@ -1,3 +1,4 @@
+import sys
 import os
 import rouge
 import warnings
@@ -49,6 +50,9 @@ def best_rouge_score(file, article, summary, greedy, beam):
 # MAIN
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
+log = open('../data/tmp/log.txt', 'a', encoding='utf-8')
+# sys.stdout = log
+
 results = '../data/tmp/best.txt'
 data = []
 refs = []
@@ -64,11 +68,11 @@ for i in range(0, length, 5):
     summary = lines[i+1]
     greedy = lines[i+2]
     beam = lines[i+3][1:-1].split(',')
-    beam, rouge_score = best_rouge_score(file, article, summary, greedy, beam)
-    data.append([file, article, summary, greedy, beam, rouge_score, 0.0])
+    final, rouge_score = best_rouge_score(file, article, summary, greedy, beam)
+    data.append([file, article, summary, greedy, final, rouge_score, 0.0])
     f1_rouge.append(rouge_score)
     refs.append(summary)
-    hyps.append(beam)
+    hyps.append(final)
 
 p, r, f1_bert = score(refs, hyps, model_type='bert-base-multilingual-cased')
 
@@ -78,7 +82,7 @@ for i in range(len(data)):
 data.sort(key=lambda x: x[5])  # reverse=True
 
 for d in data:
-    print(d[0], '\n', d[2], '\n', d[3], '\n', d[5], '\n', d[6], '\n')
+    print(d[0], '\n', d[1], d[2], '\n', d[4], '\n', d[5], '\n', d[6], '\n')
     print('------------------------------------------------------------\n')
 
 print(f"ROUGESCORE: {statistics.mean(f1_rouge):.3f}", '\n')

@@ -23,7 +23,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/news/'
+    ddir = 'data/sta/'
 
     article_files = os.listdir(ddir + 'articles/')
     for file in article_files:
@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 20]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 40]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -202,48 +202,49 @@ def process_targets(summaries, word2idx):
     return target_inputs
 
 
-def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs, train_article, train_summary, train_target):
-    # encoder
-    encoder_inputs = Input(shape=(None,), name='Encoder-Input')
+def seq2seq_architecture(latent_size, vocabulary_size, article_max_len, embedding_matrix, batch_size, epochs,
+                         train_article, train_summary, train_target):
+    encoder_inputs = Input(shape=(article_max_len,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
                                    trainable=False, mask_zero=False, name='Encoder-Word-Embedding')(encoder_inputs)
     encoder_embeddings = BatchNormalization(name='Encoder-Batch-Normalization')(encoder_embeddings)
-    encoder_conv = Conv1D(filters=256, kernel_size=2, padding='same', activation='relu')(encoder_embeddings)
-    encoder_drop = Dropout(0.2)(encoder_conv)
-    encoder_pool = MaxPooling1D(pool_size=4)(encoder_drop)
+    encoder_conv = Conv1D(filters=4, kernel_size=8, padding='same', activation='relu')(encoder_embeddings)
+    encoder_drop = Dropout(0.25)(encoder_conv)
+    encoder_pool = MaxPooling1D(pool_size=1)(encoder_drop)
     encoder_flatten = Flatten()(encoder_pool)
     encoder_model = Model(inputs=encoder_inputs, outputs=encoder_flatten, name='Encoder-Model')
     encoder_outputs = encoder_model(encoder_inputs)
 
-    # decoder
     decoder_inputs = Input(shape=(None,), name='Decoder-Input')
     decoder_embeddings = Embedding(vocabulary_size+1, 300, weights=[embedding_matrix],
                                    trainable=False, mask_zero=False, name='Decoder-Word-Embedding')(decoder_inputs)
     decoder_embeddings = BatchNormalization(name='Decoder-Batch-Normalization-1')(decoder_embeddings)
-    decoder_conv = Conv1D(filters=512, kernel_size=1, padding='same', activation='relu',
-                          name='Decoder-Conv1D')(decoder_embeddings)
-    decoder_drop = Dropout(0.2, name='Decoder-Conv1D-Dropout')(decoder_conv)
+    decoder_conv = Conv1D(filters=32, kernel_size=4, padding='same', activation='relu', name='Decoder-Conv1D') \
+        (decoder_embeddings)
+    decoder_drop = Dropout(0.25, name='Decoder-Conv1D-Dropout')(decoder_conv)
     decoder_pool = MaxPooling1D(pool_size=1, name='Decoder-MaxPool1D')(decoder_drop)  # GlobalMaxPool1D()
-    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, dropout=0.2, recurrent_dropout=0.2,
-                      name='Decoder-GRU')
+
+    decoder_gru = GRU(latent_size, return_state=True, return_sequences=True, name='Decoder-GRU')
     decoder_gru_outputs, _ = decoder_gru(decoder_pool, initial_state=encoder_outputs)
     decoder_outputs = BatchNormalization(name='Decoder-Batch-Normalization-2')(decoder_gru_outputs)
     decoder_outputs = Dense(vocabulary_size+1, activation='softmax', name='Final-Output-Dense')(decoder_outputs)
 
     seq2seq_model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
+    seq2seq_model.compile(optimizer="adam", loss='sparse_categorical_crossentropy',
+                          metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
     classes = [item for sublist in train_summary.tolist() for item in sublist]
     class_weights = class_weight.compute_class_weight('balanced', np.unique(classes), classes)
 
-    e_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='min', restore_best_weights=True)
+    e_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1, mode='min', restore_best_weights=True)
     history = seq2seq_model.fit(x=[train_article, train_summary], y=np.expand_dims(train_target, -1),
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
 
-    f = open("data/models/results.txt", "w", encoding="utf-8")
-    f.write("ConvGRU \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
+    f = open("data/models/convgru_results.txt", "w", encoding="utf-8")
+    f.write(
+        "ConvGRU \n layers: 1 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
     f.close()
 
     history_dict = history.history
@@ -327,7 +328,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
     all_references = [' '.join(summary) for summary in summaries_test]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/results.txt", "a", encoding="utf-8")
+    f = open("data/models/convgru_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
         score = prepare_results(metric, results['p'], results['r'], results['f'])
         print(score)
@@ -339,8 +340,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.9))
-test = int(round(dataset_size * 0.1))
+train = int(round(dataset_size * 0.99))
+test = int(round(dataset_size * 0.01))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -381,12 +382,11 @@ train_summary = summary_inputs[:train]
 train_target = target_inputs[:train]
 test_article = article_inputs[-test:]
 
-latent_size = 768
+latent_size = 512
 batch_size = 16
-epochs = 16
+epochs = 32
 
-encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
-                                                    train_article, train_summary, train_target)
+encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, article_max_len, embedding_matrix,
+                                                    batch_size, epochs, train_article, train_summary, train_target)
 
-evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word,
-         titles[-test:], summaries[-test:], test_article)
+evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word, titles[-test:], summaries[-test:], test_article)

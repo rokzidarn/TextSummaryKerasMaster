@@ -143,7 +143,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/test/'
+    ddir = 'data/sta/'
 
     article_files = os.listdir(ddir + 'articles/')
     for file in article_files:
@@ -166,7 +166,7 @@ def read_data():
 
 
 def load_embeddings():
-    fin = io.open('data/fasttext/wiki.sl.align.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
+    fin = io.open('data/fasttext/cc.sl.300.vec', 'r', encoding='utf-8', newline='\n', errors='ignore')
     n, d = map(int, fin.readline().split())
     embeddings_index = {}
     words = []
@@ -372,7 +372,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
     decoder_outputs = decoder_dense(decoder_concat_input)
 
     seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy',
+    seq2seq_model.compile(optimizer="adam", loss='sparse_categorical_crossentropy',
                           metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
@@ -384,7 +384,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
 
-    f = open("data/models/results.txt", "w", encoding="utf-8")
+    f = open("data/models/final_results.txt", "w", encoding="utf-8")
     f.write("Final LSTM \n layers: 2 \n latent size: " + str(latent_size) + "\n vocab size: " +
             str(vocabulary_size) + "\n")
     f.close()
@@ -566,7 +566,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
                             weight_factor=1.2,
                             stemming=True)
 
-    f = open("data/models/results.txt", "a", encoding="utf-8")
+    f = open("data/models/final_results.txt", "a", encoding="utf-8")
     f.write('\n' + 'Greedy evaluation: ' + '\n')
     greedy_scores = evaluator.get_scores(greedy_predictions, references)
     for metric, results in sorted(greedy_scores.items(), key=lambda x: x[0]):
@@ -587,11 +587,11 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.98))
-test = int(round(dataset_size * 0.02))
+train = int(round(dataset_size * 0.99))
+test = int(round(dataset_size * 0.01))
 
 articles = clean_data(articles, 300)
-summaries = clean_data(summaries, 50)
+summaries = clean_data(summaries, 60)
 article_min_len, article_max_len, article_avg_len = analyze_data(articles)
 summary_min_len, summary_max_len, summary_avg_len = analyze_data(summaries)
 
@@ -643,3 +643,26 @@ encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size
 
 evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word, titles[-test:], summaries[-test:],
          test_article, test_article_raw)
+
+"""
+The RNN function takes the current RNN state and a word vector and produces a
+subsequent RNN state that “encodes” the sentence so far.
+input_shape = (batch_size, time_steps, seq_len)
+LSTM -> (batch_size, latent_size)
+LSTM + return_sequences -> (batch_size, time_steps, units)
+
+output, state_h, state_c = LSTM(units, return_state=True)  # h<T>, h<T>, c<T>
+outputs, state_h, state_c = LSTM(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>, c<T>
+output, state_h = GRU(units, return_state=True)  # h<T>, h<T>
+outputs, state_h = GRU(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>
+
+Each LSTM cell will output one hidden state h for each input.
+Stacking RNN, the former RNN layer or layers should set return_sequences to True so that the 
+following RNN layer or layers can have the full sequence as input.
+LSTM with return_sequences=True returns the hidden state of the LSTM for every timestep in the input to the LSTM. 
+For example, if the input batch is (samples, timesteps, dims), then the call LSTM(units, return_sequences=True) 
+will generate output of dimensions (samples, timesteps, units).
+However, if you also want the final internal cell state of LSTM, use LSTM(units, return_sequence=True, return_state=True)
+In LSTMs return_sequences returns the states of the neurons at each timestep, 
+return_states returns the internal cell states, which are responsible for memory control.
+"""

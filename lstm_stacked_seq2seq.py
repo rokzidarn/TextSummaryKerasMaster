@@ -23,7 +23,7 @@ def read_data():
     articles = []
     titles = []
 
-    ddir = 'data/news/'
+    ddir = 'data/sta/'
 
     article_files = os.listdir(ddir + 'articles/')
     for file in article_files:
@@ -133,7 +133,7 @@ def build_vocabulary(tokens, embedding_words, write_dict=False):
     # fdist.plot(50)
 
     all = fdist.most_common()  # unique_words = fdist.hapaxes()
-    sub_all = [element for element in all if element[1] > 25]  # cut vocabulary
+    sub_all = [element for element in all if element[1] > 40]  # cut vocabulary
 
     embedded = []  # exclude words that are not in embedding matrix
     for element in sub_all:
@@ -242,7 +242,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
     decoder_outputs = decoder_dense(d)
 
     seq2seq_model = Model(inputs=[encoder_inputs, decoder_inputs], outputs=decoder_outputs)
-    seq2seq_model.compile(optimizer="rmsprop", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
+    seq2seq_model.compile(optimizer="adam", loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
     seq2seq_model.summary()
 
     classes = [item for sublist in train_summary.tolist() for item in sublist]
@@ -253,7 +253,7 @@ def seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_s
                                 batch_size=batch_size, epochs=epochs, validation_split=0.1,
                                 callbacks=[e_stopping], class_weight=class_weights)
 
-    f = open("data/models/results.txt", "w", encoding="utf-8")
+    f = open("data/models/stacked_results.txt", "w", encoding="utf-8")
     f.write("Stacked LSTM \n layers: 2 \n latent size: " + str(latent_size) + "\n vocab size: " + str(vocabulary_size) + "\n")
     f.close()
 
@@ -290,9 +290,6 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
 
     prediction = []
     stop_condition = False
-    previous = ''
-
-    # TODO: beam search
 
     while not stop_condition:
         candidates, h1, c1, h2, c2 = decoder_model.predict([target_sequence] + states_value)
@@ -310,11 +307,10 @@ def predict_sequence(encoder_model, decoder_model, input_sequence, word2idx, idx
 
         states_value = [h1, c1, h2, c2]
         target_sequence = np.array(predicted_word_index).reshape(1, 1)  # previous character
-        previous = predicted_word
 
     unique = [x[0] for x in itertools.groupby(prediction[:-1])]  # remove <UNK> repetition
-    final = copy_mechanism(unique, raw, word2idx)
-    return final
+    # final = copy_mechanism(unique, raw, word2idx)
+    return unique
 
 
 def copy_mechanism(prediction, article, word2idx):
@@ -368,7 +364,7 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
     all_references = [' '.join(summary) for summary in summaries_test]
     scores = evaluator.get_scores(all_hypothesis, all_references)
 
-    f = open("data/models/results.txt", "a", encoding="utf-8")
+    f = open("data/models/stacked_results.txt", "a", encoding="utf-8")
     for metric, results in sorted(scores.items(), key=lambda x: x[0]):
         score = prepare_results(metric, results['p'], results['r'], results['f'])
         print(score)
@@ -380,8 +376,8 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
 
 titles, articles, summaries = read_data()
 dataset_size = len(titles)
-train = int(round(dataset_size * 0.98))
-test = int(round(dataset_size * 0.02))
+train = int(round(dataset_size * 0.99))
+test = int(round(dataset_size * 0.01))
 
 articles = clean_data(articles)
 summaries = clean_data(summaries)
@@ -425,7 +421,7 @@ test_article_raw = articles[-test:]
 
 latent_size = 512
 batch_size = 16
-epochs = 24
+epochs = 32
 
 encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size, embedding_matrix, batch_size, epochs,
                                                     train_article, train_summary, train_target)
