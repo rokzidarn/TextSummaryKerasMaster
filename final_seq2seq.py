@@ -329,6 +329,30 @@ def process_targets(summaries, word2idx):
 
 def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embedding_matrix, batch_size, epochs,
                          train_article, train_summary, train_target):
+    """
+    The RNN function takes the current RNN state and a word vector and produces a
+    subsequent RNN state that “encodes” the sentence so far.
+    input_shape = (batch_size, time_steps, seq_len)
+    LSTM -> (batch_size, latent_size)
+    LSTM + return_sequences -> (batch_size, time_steps, units)
+
+    output, state_h, state_c = LSTM(units, return_state=True)  # h<T>, h<T>, c<T>
+    outputs, state_h, state_c = LSTM(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>, c<T>
+    output, state_h = GRU(units, return_state=True)  # h<T>, h<T>
+    outputs, state_h = GRU(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>
+
+    Each LSTM cell will output one hidden state h for each input.
+    Stacking RNN, the former RNN layer or layers should set return_sequences to True so that the
+    following RNN layer or layers can have the full sequence as input.
+    LSTM with return_sequences=True returns the hidden state of the LSTM for every timestep in the input to the LSTM.
+    For example, if the input batch is (samples, timesteps, dims), then the call LSTM(units, return_sequences=True)
+    will generate output of dimensions (samples, timesteps, units).
+    However, if you also want the final internal cell state of LSTM,
+    use LSTM(units, return_sequence=True, return_state=True)
+    In LSTMs return_sequences returns the states of the neurons at each timestep,
+    return_states returns the internal cell states, which are responsible for memory control.
+    """
+
     # encoder
     encoder_inputs = Input(shape=(max_len_article,), name='Encoder-Input')
     encoder_embeddings = Embedding(vocabulary_size, 300, weights=[embedding_matrix], trainable=False, mask_zero=False,
@@ -343,6 +367,8 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
     e = encoder_embeddings(encoder_inputs)
     e = norm_encoder_embeddings(e)
     e, e_state_h_1, e_state_c_1 = encoder_lstm_1(e)
+    # returns last state (hidden state + cell state), discard encoder_outputs, only keep the states
+    # return state = returns the hidden state output and cell state for the last input time step
     encoder_outputs, e_state_h_2, e_state_c_2 = encoder_lstm_2(e)
     # the encoded fix-sized vector which seq2seq is all about
 
@@ -363,8 +389,10 @@ def seq2seq_architecture(latent_size, vocabulary_size, max_len_article, embeddin
     decoder_dense = TimeDistributed(Dense(vocabulary_size, activation='softmax'), name="Final-Output-Dense")
 
     d = decoder_embeddings(decoder_inputs)
-    d = norm_decoder_embeddings(d)
+    d = norm_decoder_embeddings(d)  # set up decoder, using encoder_states as initial state
     d, d_state_h_1, d_state_c_1 = decoder_lstm_1(d, initial_state=[e_state_h_1, e_state_c_1])
+    # return state needed for inference
+    # return_sequence = returns the hidden state output for each input time step
     decoder_outputs, d_state_h_2, d_state_c_2 = decoder_lstm_2(d, initial_state=[e_state_h_2, e_state_c_2])
     decoder_outputs = norm_decoder(decoder_outputs)
     attention_out, attention_states = attention_layer([encoder_outputs, decoder_outputs])
@@ -558,13 +586,13 @@ def evaluate(encoder_model, decoder_model, max_len, word2idx, idx2word, titles_t
     evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l'],
                             max_n=2,
                             limit_length=True,
-                            length_limit=50,
+                            length_limit=60,
                             length_limit_type='words',
                             apply_avg=False,
                             apply_best=True,
                             alpha=0.5,
                             weight_factor=1.2,
-                            stemming=True)
+                            stemming=False)
 
     f = open("data/models/final_results.txt", "a", encoding="utf-8")
     f.write('\n' + 'Greedy evaluation: ' + '\n')
@@ -643,26 +671,3 @@ encoder_model, decoder_model = seq2seq_architecture(latent_size, vocabulary_size
 
 evaluate(encoder_model, decoder_model, summary_max_len, word2idx, idx2word, titles[-test:], summaries[-test:],
          test_article, test_article_raw)
-
-"""
-The RNN function takes the current RNN state and a word vector and produces a
-subsequent RNN state that “encodes” the sentence so far.
-input_shape = (batch_size, time_steps, seq_len)
-LSTM -> (batch_size, latent_size)
-LSTM + return_sequences -> (batch_size, time_steps, units)
-
-output, state_h, state_c = LSTM(units, return_state=True)  # h<T>, h<T>, c<T>
-outputs, state_h, state_c = LSTM(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>, c<T>
-output, state_h = GRU(units, return_state=True)  # h<T>, h<T>
-outputs, state_h = GRU(units, return_sequences=True, return_state=True)  # h<1...T>, h<T>
-
-Each LSTM cell will output one hidden state h for each input.
-Stacking RNN, the former RNN layer or layers should set return_sequences to True so that the 
-following RNN layer or layers can have the full sequence as input.
-LSTM with return_sequences=True returns the hidden state of the LSTM for every timestep in the input to the LSTM. 
-For example, if the input batch is (samples, timesteps, dims), then the call LSTM(units, return_sequences=True) 
-will generate output of dimensions (samples, timesteps, units).
-However, if you also want the final internal cell state of LSTM, use LSTM(units, return_sequence=True, return_state=True)
-In LSTMs return_sequences returns the states of the neurons at each timestep, 
-return_states returns the internal cell states, which are responsible for memory control.
-"""
